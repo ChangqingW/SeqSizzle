@@ -7,15 +7,15 @@ use bio::pattern_matching::myers::Myers;
 use ratatui::prelude::Line;
 
 #[derive(Debug)]
-pub struct App<'a> {
+pub struct App {
     pub quit: bool,
-    pub search_patterns: Vec<(String, &'a str)>,
+    pub search_patterns: Vec<(String, String)>,
     pub records_buf: Vec<fastq::Record>,
     file: String,
     reader: Reader<std::io::BufReader<std::fs::File>>, // buf_size
 }
 
-impl App<'_> {
+impl App {
     pub fn new(file: String) -> Self {
         let mut reader = fastq::Reader::from_file(file.clone()).expect("Failed to open fastq file");
         let mut record = fastq::Record::new();
@@ -28,15 +28,15 @@ impl App<'_> {
             reader.read(&mut record).expect("Failed to parse record");
         }
         App {
-            reader: reader,
+            reader,
             quit: false,
             search_patterns: vec![
-                ("AGATCGGAAGAGCGTCGTGTAGAA".to_string(), "#00FF00"),
-                ("AACGCAGAGGAA".to_string(), "#FF0000"),
-                ("TCTTCCGA".to_string(), "#ffff00"),
+                ("AGATCGGAAGAGCGTCGTGTAGAA".to_string(), "#00FF00".to_string()),
+                ("AACGCAGAGGAA".to_string(), "#FF0000".to_string()),
+                ("TCTTCCGA".to_string(), "#ffff00".to_string()),
             ],
             records_buf: records,
-            file: file,
+            file,
         }
     }
 
@@ -45,12 +45,11 @@ impl App<'_> {
         self.quit = true;
     }
 
-    // TODO: fix lifetime
-    // pub fn set_search_patterns(&mut self, search_patterns: Vec<(String, &str)>) {
-    //     self.search_patterns = search_patterns;
-    // }
+    pub fn set_search_patterns(&mut self, search_patterns: Vec<(String, String)>) {
+         self.search_patterns = search_patterns;
+    }
 
-    pub fn update(&self) -> Vec<Line> {
+    pub fn update<'a>(&self) -> Vec<Line<'a>> {
         let mut result: Vec<Line> = Vec::new();
         for record in &self.records_buf {
             let seq = String::from_utf8_lossy(record.seq()).to_string();

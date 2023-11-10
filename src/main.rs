@@ -2,7 +2,6 @@ pub mod app;
 pub mod read_stylizing;
 pub mod tui;
 pub mod event;
-pub mod ui;
 
 use app::App;
 use tui::Tui;
@@ -11,6 +10,7 @@ use event::{Event, EventHandler};
 use anyhow::Result;
 use std::env;
 use ratatui::prelude::{CrosstermBackend, Terminal};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn main() -> Result<()> {
     // Initialize App
@@ -30,7 +30,18 @@ fn main() -> Result<()> {
         tui.draw(&mut app)?;
         // Handle events.
         match tui.events.next()? {
-            Event::Key(_key_event) => {break},
+            Event::Key(key_event) => {
+                match key_event.code {
+                    KeyCode::Char('q') => {break},
+                    KeyCode::Char('j') => {tui.scroll_idx += 1},
+                    KeyCode::Char('k') => {
+                        if tui.scroll_idx != 0 {
+                            tui.scroll_idx -= 1;
+                        }
+                    },
+                    _ => {}
+                }
+            },
             _ => {}
         };
     }
