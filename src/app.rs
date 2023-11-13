@@ -9,7 +9,7 @@ use ratatui::prelude::Line;
 #[derive(Debug)]
 pub struct App {
     pub quit: bool,
-    pub search_patterns: Vec<(String, String)>,
+    pub search_patterns: Vec<(String, String, u8)>,
     pub records_buf: Vec<fastq::Record>,
     file: String,
     reader: Reader<std::io::BufReader<std::fs::File>>, // buf_size
@@ -31,9 +31,11 @@ impl App {
             reader,
             quit: false,
             search_patterns: vec![
-                ("AGATCGGAAGAGCGTCGTGTAGAA".to_string(), "#00FF00".to_string()),
-                ("AACGCAGAGGAA".to_string(), "#FF0000".to_string()),
-                ("TCTTCCGA".to_string(), "#ffff00".to_string()),
+                ("CTACACGACGCTCTTCCGATCT".to_string(), "#00FF00".to_string(), 3),
+                ("AGATCGGAAGAGCGTCGTGTAG".to_string(), "#FF0000".to_string(), 3),
+                ("TTTTTTTTTTTT".to_string(), "#00FF00".to_string(), 0),
+                ("AAAAAAAAAAAA".to_string(), "#FF0000".to_string(), 0),
+                ("GGGCCCGAAGCGTTTA".to_string(), "#FFC0CB".to_string(), 0),
             ],
             records_buf: records,
             file,
@@ -45,7 +47,7 @@ impl App {
         self.quit = true;
     }
 
-    pub fn set_search_patterns(&mut self, search_patterns: Vec<(String, String)>) {
+    pub fn set_search_patterns(&mut self, search_patterns: Vec<(String, String, u8)>) {
          self.search_patterns = search_patterns;
     }
 
@@ -55,12 +57,12 @@ impl App {
             let seq = String::from_utf8_lossy(record.seq()).to_string();
 
             let mut matches: Vec<(Vec<(usize, usize)>, &str)> = Vec::new();
-            for (pattern, col) in &self.search_patterns {
+            for (pattern, col, dist) in &self.search_patterns {
                 let mut myers_1 = Myers::<u64>::new(pattern.clone().into_bytes());
                 let _aln = Alignment::default();
                 let matches_1: Vec<(usize, usize)> = merge_intervals(
                     &myers_1
-                        .find_all(record.seq(), 2)
+                        .find_all(record.seq(), *dist)
                         .map(|(a, b, _)| (a, b))
                         .collect::<Vec<(usize, usize)>>(),
                 );
