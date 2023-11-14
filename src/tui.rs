@@ -9,6 +9,7 @@ use ratatui::{
   prelude::{Constraint, Direction, Frame, Layout, Line},
   widgets::{Block, Borders, Paragraph, Wrap},
 };
+use ratatui::layout::Rect;
 use tui_textarea::TextArea;
 use crate::{app::App, event::EventHandler};
 
@@ -71,6 +72,12 @@ impl Tui<'_> {
     Self::reset()?;
     self.terminal.show_cursor()?;
     Ok(())
+  }
+  pub fn viewer_size(&self) -> Rect {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
+        .split(self.terminal.size().unwrap())[0]
   }
 }
 
