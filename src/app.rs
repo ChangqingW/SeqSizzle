@@ -7,15 +7,16 @@ use bio::pattern_matching::myers::Myers;
 use ratatui::prelude::Line;
 
 #[derive(Debug)]
-pub struct App {
+pub struct App<'a> {
     pub quit: bool,
     pub search_patterns: Vec<(String, String, u8)>,
     pub records_buf: Vec<fastq::Record>,
+    pub line_buf: Vec<Line<'a>>,
     file: String,
     reader: Reader<std::io::BufReader<std::fs::File>>, // buf_size
 }
 
-impl App {
+impl App<'_> {
     pub fn new(file: String) -> Self {
         let mut reader = fastq::Reader::from_file(file.clone()).expect("Failed to open fastq file");
         let mut record = fastq::Record::new();
@@ -27,7 +28,7 @@ impl App {
             records.push(record.to_owned());
             reader.read(&mut record).expect("Failed to parse record");
         }
-        App {
+        let mut instance = App {
             reader,
             quit: false,
             search_patterns: vec![
@@ -38,8 +39,11 @@ impl App {
                 ("GGGCCCGAAGCGTTTA".to_string(), "#FFC0CB".to_string(), 0),
             ],
             records_buf: records,
+            line_buf: Vec::new(),
             file,
-        }
+        };
+        instance.update();
+        instance
     }
 
     /// Set running to false to quit the application.
@@ -51,26 +55,26 @@ impl App {
          self.search_patterns = search_patterns;
     }
 
-    pub fn update<'a>(&self) -> Vec<Line<'a>> {
+    pub fn update(&mut self) {
         let mut result: Vec<Line> = Vec::new();
         for record in &self.records_buf {
             let seq = String::from_utf8_lossy(record.seq()).to_string();
 
             let mut matches: Vec<(Vec<(usize, usize)>, &str)> = Vec::new();
             for (pattern, col, dist) in &self.search_patterns {
-                let mut myers_1 = Myers::<u64>::new(pattern.clone().into_bytes());
+                let mut myers = Myers::<u64>::new(pattern.clone().into_bytes());
                 let _aln = Alignment::default();
-                let matches_1: Vec<(usize, usize)> = merge_intervals(
-                    &myers_1
+                let pattern_match: Vec<(usize, usize)> = merge_intervals(
+                    &myers
                         .find_all(record.seq(), *dist)
                         .map(|(a, b, _)| (a, b))
                         .collect::<Vec<(usize, usize)>>(),
                 );
-                matches.push((matches_1, col));
+                matches.push((pattern_match, col));
             }
             result.push(record.id().to_string().into());
             result.push(highligh_matches(&matches, seq, "#0000FF"));
         }
-        result
+        self.line_buf = result;
     }
 }

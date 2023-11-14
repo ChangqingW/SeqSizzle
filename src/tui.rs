@@ -1,4 +1,5 @@
 use std::{io, panic};
+use std::panic::panic_any;
 use anyhow::Result;
 use crossterm::{
   event::{DisableMouseCapture, EnableMouseCapture},
@@ -17,17 +18,16 @@ use crate::{app::App, event::EventHandler};
 ///
 /// It is responsible for setting up the terminal,
 /// initializing the interface and handling the draw events.
-pub struct Tui<'a> {
+pub struct Tui {
   terminal: CrosstermTerminal,
   pub events: EventHandler,
-  view_buffer: Vec<Line<'a>>,
   pub scroll_idx: u16
 }
 
-impl Tui<'_> {
+impl Tui {
   /// Constructs a new instance of [`Tui`].
   pub fn new(terminal: CrosstermTerminal, events: EventHandler) -> Self {
-    Self { terminal, events, view_buffer: Vec::new(), scroll_idx: 0}
+    Self { terminal, events, scroll_idx: 0}
   }
 
   pub fn enter(&mut self) -> Result<()> {
@@ -47,19 +47,15 @@ impl Tui<'_> {
     Ok(())
   }
 
-  fn update_view_buffer(&mut self, app: &App) {
-    self.view_buffer = app.update();
-  }
-
   /// [`Draw`] the terminal interface by [`rendering`] the widgets.
   ///
   /// [`Draw`]: tui::Terminal::draw
   /// [`rendering`]: crate::ui:render
   pub fn draw(&mut self, app: &mut App) -> Result<()> {
-    if self.view_buffer.is_empty() {
-      self.update_view_buffer(app);
+    if app.line_buf.is_empty() {
+      panic!("No lines in app.line_buf!\n{:?}", app)
     }
-    self.terminal.draw(|frame| render(self.view_buffer.clone(), app, frame, self.scroll_idx))?;
+    self.terminal.draw(|frame| render(app.line_buf.clone(), app, frame, self.scroll_idx))?;
     Ok(())
   }
 
