@@ -1,10 +1,12 @@
-use crate::read_stylizing::{highligh_matches, merge_intervals};
-use bio::alignment::Alignment;
+use crate::read_stylizing::highlight_matches;
+
 use bio::io::fastq;
 use bio::io::fastq::FastqRead;
 use bio::io::fastq::Reader;
 use bio::pattern_matching::myers::Myers;
 use ratatui::prelude::Line;
+use interval::interval_set::ToIntervalSet;
+use interval::IntervalSet;
 
 #[derive(Debug)]
 pub struct App<'a> {
@@ -36,7 +38,7 @@ impl App<'_> {
                 ("AGATCGGAAGAGCGTCGTGTAG".to_string(), "#FF0000".to_string(), 3),
                 ("TTTTTTTTTTTT".to_string(), "#00FF00".to_string(), 0),
                 ("AAAAAAAAAAAA".to_string(), "#FF0000".to_string(), 0),
-                ("GGGCCCGAAGCGTTTA".to_string(), "#FFC0CB".to_string(), 0),
+                ("TCTTCTTTC".to_string(), "#FFC0CB".to_string(), 0),
             ],
             records_buf: records,
             line_buf: Vec::new(),
@@ -52,7 +54,7 @@ impl App<'_> {
     }
 
     pub fn set_search_patterns(&mut self, search_patterns: Vec<(String, String, u8)>) {
-         self.search_patterns = search_patterns;
+        self.search_patterns = search_patterns;
     }
 
     pub fn update(&mut self) {
@@ -60,20 +62,17 @@ impl App<'_> {
         for record in &self.records_buf {
             let seq = String::from_utf8_lossy(record.seq()).to_string();
 
-            let mut matches: Vec<(Vec<(usize, usize)>, &str)> = Vec::new();
+            let mut matches: Vec<(IntervalSet<usize>, &str)> = Vec::new();
             for (pattern, col, dist) in &self.search_patterns {
                 let mut myers = Myers::<u64>::new(pattern.clone().into_bytes());
-                let _aln = Alignment::default();
-                let pattern_match: Vec<(usize, usize)> = merge_intervals(
-                    &myers
-                        .find_all(record.seq(), *dist)
-                        .map(|(a, b, _)| (a, b))
-                        .collect::<Vec<(usize, usize)>>(),
-                );
-                matches.push((pattern_match, col));
+                matches.push((myers
+                                  .find_all(record.seq(), *dist)
+                                  .map(|(a, b, _)| (a, b - 1))
+                                  .collect::<Vec<(usize, usize)>>()
+                                  .to_interval_set(), col));
             }
             result.push(record.id().to_string().into());
-            result.push(highligh_matches(&matches, seq, "#0000FF"));
+            result.push(highlight_matches(&matches, seq, "#0000FF"));
         }
         self.line_buf = result;
     }

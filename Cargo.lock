@@ -352,6 +352,7 @@ dependencies = [
  "crossterm",
  "gcollections",
  "intervallum",
+ "num-traits",
  "ratatui",
  "tui-textarea",
 ]
