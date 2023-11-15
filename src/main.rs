@@ -1,11 +1,12 @@
 pub mod app;
 pub mod read_stylizing;
 pub mod tui;
+mod ui;
 pub mod event;
 
-use app::App;
-use tui::Tui;
 
+use app::{App, UIMode};
+use tui::Tui;
 use event::{Event, EventHandler};
 use anyhow::Result;
 use std::env;
@@ -29,66 +30,92 @@ fn main() -> Result<()> {
         // Render the user interface.
         tui.draw(&mut app)?;
         // Handle events.
-        match tui.events.next()? {
-            Event::Key(KeyEvent {
-                           code: KeyCode::Char('c'),
-                           modifiers: KeyModifiers::CONTROL,
-                           ..
-                       })
-            | Event::Key(KeyEvent {
-                             code: KeyCode::Char('q'),
-                             modifiers: KeyModifiers::NONE,
-                             ..
-                         }) => { app.quit() }
+        match app.mode {
+            UIMode::Viewer => {
+                match tui.events.next()? {
+                    Event::Key(KeyEvent {
+                                   code: KeyCode::Char('c'),
+                                   modifiers: KeyModifiers::CONTROL,
+                                   ..
+                               })
+                    | Event::Key(KeyEvent {
+                                     code: KeyCode::Char('q'),
+                                     modifiers: KeyModifiers::NONE,
+                                     ..
+                                 }) => { app.quit() }
 
-            Event::Key(KeyEvent {
-                           code: KeyCode::Char('j'),
-                           modifiers: KeyModifiers::NONE,
-                           ..
-                       }) => { tui.scroll_idx += 1 }
-            Event::Key(KeyEvent {
-                           code: KeyCode::Char('k'),
-                           modifiers: KeyModifiers::NONE,
-                           ..
-                       }) => {
-                if tui.scroll_idx != 0 {
-                    tui.scroll_idx -= 1;
+                    Event::Key(KeyEvent {
+                                   code: KeyCode::Char('j'),
+                                   modifiers: KeyModifiers::NONE,
+                                   ..
+                               }) => { app.line_num += 1 }
+                    Event::Key(KeyEvent {
+                                   code: KeyCode::Char('k'),
+                                   modifiers: KeyModifiers::NONE,
+                                   ..
+                               }) => {
+                        if app.line_num != 0 {
+                            app.line_num -= 1;
+                        }
+                    }
+
+                    Event::Key(KeyEvent {
+                                   code: KeyCode::Char('d'),
+                                   modifiers: KeyModifiers::CONTROL,
+                                   ..
+                               }) => { app.line_num += (tui.size().height as f32 * 0.4).floor() as u16 }
+                    Event::Key(KeyEvent {
+                                   code: KeyCode::Char('u'),
+                                   modifiers: KeyModifiers::CONTROL,
+                                   ..
+                               }) => {
+                        let up: u16 = (tui.size().height as f32 * 0.4).floor() as u16;
+                        app.line_num = if app.line_num < up { 0 } else { app.line_num - up };
+                    }
+
+                    Event::Key(KeyEvent {
+                                   code: KeyCode::Char('g'),
+                                   modifiers: KeyModifiers::NONE,
+                                   ..
+                               }) => {
+                        let mut next: Event = tui.events.next()?;
+                        while let Event::Tick = next {
+                            next = tui.events.next()?;
+                        }
+                        if let Event::Key(KeyEvent {
+                                              code: KeyCode::Char('g'),
+                                              modifiers: KeyModifiers::NONE,
+                                              ..
+                                          }) = next {
+                            app.line_num = 0
+                        }
+                    },
+
+                    Event::Key(KeyEvent {
+                                   code: KeyCode::Char('/'),
+                                   modifiers: KeyModifiers::NONE,
+                                   ..
+                               }) => {
+                        app.mode = UIMode::SearchPopup;
+                        continue
+                    }
+
+                    _ => {}
                 }
             }
-
-            Event::Key(KeyEvent {
-                           code: KeyCode::Char('d'),
-                           modifiers: KeyModifiers::CONTROL,
-                           ..
-                       }) => { tui.scroll_idx += (tui.viewer_size().height as f32 * 0.4).floor() as u16 }
-            Event::Key(KeyEvent {
-                           code: KeyCode::Char('u'),
-                           modifiers: KeyModifiers::CONTROL,
-                           ..
-                       }) => {
-                let up: u16 = (tui.viewer_size().height as f32 * 0.4).floor() as u16;
-                tui.scroll_idx = if tui.scroll_idx < up { 0 } else { tui.scroll_idx - up };
-            }
-
-            Event::Key(KeyEvent {
-                           code: KeyCode::Char('g'),
-                           modifiers: KeyModifiers::NONE,
-                           ..
-                       }) => {
-                let mut next: Event = tui.events.next()?;
-                while let Event::Tick = next {
-                    next = tui.events.next()?;
-                }
-                if let Event::Key(KeyEvent {
-                                      code: KeyCode::Char('g'),
-                                      modifiers: KeyModifiers::NONE,
-                                      ..
-                                  }) = next {
-                    tui.scroll_idx = 0
+            UIMode::SearchPopup => {
+                match tui.events.next()? {
+                    Event::Key(KeyEvent {
+                                   code: KeyCode::Char('/'),
+                                   modifiers: KeyModifiers::NONE,
+                                   ..
+                               }) => {
+                        app.mode = UIMode::Viewer;
+                        continue
+                    },
+                    _ => {}
                 }
             }
-
-            _ => {}
         }
     }
 

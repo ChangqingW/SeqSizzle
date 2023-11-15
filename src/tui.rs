@@ -7,12 +7,11 @@ use crossterm::{
 };
 pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stderr>>;
 use ratatui::{
-  prelude::{Constraint, Direction, Frame, Layout, Line},
-  widgets::{Block, Borders, Paragraph, Wrap},
+  prelude::{Constraint, Direction, Frame, Layout, Line, Rect},
+  widgets::{Block, Borders, Paragraph, Wrap, Clear},
 };
-use ratatui::layout::Rect;
 use tui_textarea::TextArea;
-use crate::{app::App, event::EventHandler};
+use crate::{app::{App, UIMode}, event::EventHandler, ui::{render}};
 
 /// Representation of a terminal user interface.
 ///
@@ -21,13 +20,12 @@ use crate::{app::App, event::EventHandler};
 pub struct Tui {
   terminal: CrosstermTerminal,
   pub events: EventHandler,
-  pub scroll_idx: u16
 }
 
 impl Tui {
   /// Constructs a new instance of [`Tui`].
   pub fn new(terminal: CrosstermTerminal, events: EventHandler) -> Self {
-    Self { terminal, events, scroll_idx: 0}
+    Self { terminal, events }
   }
 
   pub fn enter(&mut self) -> Result<()> {
@@ -55,7 +53,7 @@ impl Tui {
     if app.line_buf.is_empty() {
       panic!("No lines in app.line_buf!\n{:?}", app)
     }
-    self.terminal.draw(|frame| render(app.line_buf.clone(), app, frame, self.scroll_idx))?;
+    self.terminal.draw(|frame| render(app.line_buf.clone(), app, frame))?;
     Ok(())
   }
 
@@ -69,27 +67,7 @@ impl Tui {
     self.terminal.show_cursor()?;
     Ok(())
   }
-  pub fn viewer_size(&self) -> Rect {
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
-        .split(self.terminal.size().unwrap())[0]
+  pub fn size(&self) -> Rect {
+    self.terminal.size().unwrap()
   }
-}
-
-fn render(view_buffer: Vec<Line>, app: &mut App, frame: &mut Frame, scroll: u16) {
-  let layout = Layout::default()
-      .direction(Direction::Vertical)
-      .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
-      .split(frame.size());
-
-  frame.render_widget(
-    Paragraph::new(view_buffer)
-        .block(Block::default().borders(Borders::ALL))
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0)),
-    layout[0],
-  );
-  let mut textarea = TextArea::default();
-  frame.render_widget(textarea.widget(), layout[1]);
 }

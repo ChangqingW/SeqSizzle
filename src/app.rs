@@ -14,8 +14,16 @@ pub struct App<'a> {
     pub search_patterns: Vec<(String, String, u8)>,
     pub records_buf: Vec<fastq::Record>,
     pub line_buf: Vec<Line<'a>>,
+    pub mode: UIMode,
+    pub line_num: u16,
     file: String,
     reader: Reader<std::io::BufReader<std::fs::File>>, // buf_size
+}
+
+#[derive(Debug)]
+pub enum UIMode {
+    Viewer,
+    SearchPopup
 }
 
 impl App<'_> {
@@ -31,7 +39,6 @@ impl App<'_> {
             reader.read(&mut record).expect("Failed to parse record");
         }
         let mut instance = App {
-            reader,
             quit: false,
             search_patterns: vec![
                 ("CTACACGACGCTCTTCCGATCT".to_string(), "#00FF00".to_string(), 3),
@@ -42,7 +49,10 @@ impl App<'_> {
             ],
             records_buf: records,
             line_buf: Vec::new(),
+            mode: UIMode::Viewer,
+            line_num: 0,
             file,
+            reader,
         };
         instance.update();
         instance
