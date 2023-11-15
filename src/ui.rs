@@ -8,11 +8,12 @@ use tui_textarea::TextArea;
 use crate::{app::{App, UIMode}, event::EventHandler};
 
 pub fn render(view_buffer: Vec<Line>, app: &App, frame: &mut Frame) {
+    let scroll: u16 = line_num_to_scroll(&view_buffer, app.line_num, frame.size().width - 2);
     frame.render_widget(
         Paragraph::new(view_buffer)
             .block(Block::default().borders(Borders::ALL))
             .wrap(Wrap { trim: false })
-            .scroll((app.line_num, 0)),
+            .scroll((scroll, 0)),
         frame.size(),
     );
     match app.mode {
@@ -44,4 +45,14 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+pub fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
+    if (row_len == 0) | (line_num == 0) {
+        0
+    } else {
+        text[..line_num].iter()
+            .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
+            .sum()
+    }
 }

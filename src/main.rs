@@ -63,13 +63,13 @@ fn main() -> Result<()> {
                                    code: KeyCode::Char('d'),
                                    modifiers: KeyModifiers::CONTROL,
                                    ..
-                               }) => { app.line_num += (tui.size().height as f32 * 0.4).floor() as u16 }
+                               }) => { app.line_num += (tui.size().height as f32 * 0.4).floor() as usize }
                     Event::Key(KeyEvent {
                                    code: KeyCode::Char('u'),
                                    modifiers: KeyModifiers::CONTROL,
                                    ..
                                }) => {
-                        let up: u16 = (tui.size().height as f32 * 0.4).floor() as u16;
+                        let up: usize = (tui.size().height as f32 * 0.4).floor() as usize ;
                         app.line_num = if app.line_num < up { 0 } else { app.line_num - up };
                     }
 
