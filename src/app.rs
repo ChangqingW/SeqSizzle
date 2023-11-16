@@ -1,12 +1,14 @@
 use crate::read_stylizing::highlight_matches;
-
+use std::str::FromStr;
 use bio::io::fastq;
 use bio::io::fastq::FastqRead;
 use bio::io::fastq::Reader;
 use bio::pattern_matching::myers::Myers;
-use ratatui::prelude::{Line, Color};
+use ratatui::prelude::{Line, Color, Span, Style, Modifier};
+use ratatui::widgets::{List, ListItem, Block, Borders};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
+use tui_textarea::TextArea;
 
 #[derive(Debug)]
 pub struct App<'a> {
@@ -16,6 +18,7 @@ pub struct App<'a> {
     pub line_buf: Vec<Line<'a>>,
     pub mode: UIMode,
     pub line_num: usize,
+    pub search_panel: SearchPanel<'a>,
     file: String,
     reader: Reader<std::io::BufReader<std::fs::File>>, // buf_size
 }
@@ -33,6 +36,48 @@ impl SearchPattern {
             color,
             edit_distance
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct SearchPanel<'a> {
+    pub patterns_list: List<'a>,
+    pub input_pattern: TextArea<'a>,
+    pub input_color: TextArea<'a>,
+    pub input_distance: TextArea<'a>
+//    input_button: dyn Widget
+}
+
+fn search_patterns_to_list<'a>(search_patterns: &[(String, String, u8)]) -> List<'a> {
+    List::new(search_patterns.iter()
+        .map(|(pattern, color, distance)| {
+            ListItem::new(Line::from(vec![
+                Span::from(pattern.clone()),
+                Span::from(", color: "),
+                Span::styled(color.clone(), Style::new().fg(Color::from_str(color).unwrap())),
+                Span::from(format!(", edit-distance: {}", distance))
+            ]))
+        })
+        .collect::<Vec<ListItem>>())
+        .block(Block::default().title("Search patterns").borders(Borders::ALL))
+        .highlight_style(Style::default().add_modifier(Modifier::ITALIC))
+        .highlight_symbol(">del ")
+}
+impl SearchPanel<'_> {
+    pub fn new(search_patterns: &[(String, String, u8)]) -> Self {
+        let mut ret = Self {
+            patterns_list: search_patterns_to_list(search_patterns),
+            input_pattern: TextArea::default(),
+            input_color: TextArea::default(),
+            input_distance: TextArea::default(),
+        };
+        ret.input_pattern.
+            set_block(Block::default().borders(Borders::ALL).title("Search string"));
+        ret.input_color.
+            set_block(Block::default().borders(Borders::ALL).title("Color"));
+        ret.input_distance.
+            set_block(Block::default().borders(Borders::ALL).title("Edit distance"));
+        ret
     }
 }
 
@@ -63,19 +108,21 @@ impl App<'_> {
             records.push(record.to_owned());
             reader.read(&mut record).expect("Failed to parse record");
         }
+        let default_search_patterns = vec![
+            ("CTACACGACGCTCTTCCGATCT".to_string(), "#00FF00".to_string(), 3),
+            ("AGATCGGAAGAGCGTCGTGTAG".to_string(), "#FF0000".to_string(), 3),
+            ("TTTTTTTTTTTT".to_string(), "#00FF00".to_string(), 0),
+            ("AAAAAAAAAAAA".to_string(), "#FF0000".to_string(), 0),
+            ("TCTTCTTTC".to_string(), "#FFC0CB".to_string(), 0),
+        ];
         let mut instance = App {
             quit: false,
-            search_patterns: vec![
-                ("CTACACGACGCTCTTCCGATCT".to_string(), "#00FF00".to_string(), 3),
-                ("AGATCGGAAGAGCGTCGTGTAG".to_string(), "#FF0000".to_string(), 3),
-                ("TTTTTTTTTTTT".to_string(), "#00FF00".to_string(), 0),
-                ("AAAAAAAAAAAA".to_string(), "#FF0000".to_string(), 0),
-                ("TCTTCTTTC".to_string(), "#FFC0CB".to_string(), 0),
-            ],
+            search_patterns: default_search_patterns.clone(),
             records_buf: records,
             line_buf: Vec::new(),
             mode: UIMode::Viewer,
             line_num: 0,
+            search_panel: SearchPanel::new(&default_search_patterns),
             file,
             reader,
         };
