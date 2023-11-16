@@ -4,7 +4,7 @@ use bio::io::fastq;
 use bio::io::fastq::FastqRead;
 use bio::io::fastq::Reader;
 use bio::pattern_matching::myers::Myers;
-use ratatui::prelude::Line;
+use ratatui::prelude::{Line, Color};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
 
@@ -21,9 +21,34 @@ pub struct App<'a> {
 }
 
 #[derive(Debug)]
+pub struct SearchPattern {
+    pub search_string: String,
+    pub color: Color,
+    pub edit_distance: u8
+}
+impl SearchPattern {
+    pub fn new(search_string: String, color: Color, edit_distance: u8) -> Self {
+        Self {
+            search_string,
+            color,
+            edit_distance
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum UIMode {
     Viewer,
-    SearchPopup
+    SearchPanel(SearchPanelFocus)
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SearchPanelFocus {
+    PatternsList,
+    InputPattern,
+    InputColor,
+    InputDistance,
+    InputButton
 }
 
 impl App<'_> {
@@ -65,6 +90,24 @@ impl App<'_> {
 
     pub fn set_search_patterns(&mut self, search_patterns: Vec<(String, String, u8)>) {
         self.search_patterns = search_patterns;
+    }
+
+    pub fn toggle_ui_mode(&mut self) {
+        if self.mode == UIMode::Viewer {
+            self.mode = UIMode::SearchPanel(SearchPanelFocus::PatternsList)
+        } else {
+            self.mode = UIMode::Viewer
+        }
+    }
+
+    pub fn scroll(&mut self, num: isize) -> bool {
+        if num < 0 && (num.abs() as usize > self.line_num) {
+            self.line_num = 0;
+            false
+        } else {
+            self.line_num = (self.line_num as isize + num) as usize;
+            true
+        }
     }
 
     pub fn update(&mut self) {

@@ -2,6 +2,7 @@ pub mod app;
 pub mod read_stylizing;
 pub mod tui;
 mod ui;
+pub mod control;
 pub mod event;
 
 
@@ -11,7 +12,7 @@ use event::{Event, EventHandler};
 use anyhow::Result;
 use std::env;
 use ratatui::prelude::{CrosstermBackend, Terminal};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::control::{handle_input, Update};
 
 fn main() -> Result<()> {
     // Initialize App
@@ -30,92 +31,13 @@ fn main() -> Result<()> {
         // Render the user interface.
         tui.draw(&mut app)?;
         // Handle events.
-        match app.mode {
-            UIMode::Viewer => {
-                match tui.events.next()? {
-                    Event::Key(KeyEvent {
-                                   code: KeyCode::Char('c'),
-                                   modifiers: KeyModifiers::CONTROL,
-                                   ..
-                               })
-                    | Event::Key(KeyEvent {
-                                     code: KeyCode::Char('q'),
-                                     modifiers: KeyModifiers::NONE,
-                                     ..
-                                 }) => { app.quit() }
-
-                    Event::Key(KeyEvent {
-                                   code: KeyCode::Char('j'),
-                                   modifiers: KeyModifiers::NONE,
-                                   ..
-                               }) => { app.line_num += 1 }
-                    Event::Key(KeyEvent {
-                                   code: KeyCode::Char('k'),
-                                   modifiers: KeyModifiers::NONE,
-                                   ..
-                               }) => {
-                        if app.line_num != 0 {
-                            app.line_num -= 1;
-                        }
-                    }
-
-                    Event::Key(KeyEvent {
-                                   code: KeyCode::Char('d'),
-                                   modifiers: KeyModifiers::CONTROL,
-                                   ..
-                               }) => { app.line_num += (tui.size().height as f32 * 0.4).floor() as usize }
-                    Event::Key(KeyEvent {
-                                   code: KeyCode::Char('u'),
-                                   modifiers: KeyModifiers::CONTROL,
-                                   ..
-                               }) => {
-                        let up: usize = (tui.size().height as f32 * 0.4).floor() as usize ;
-                        app.line_num = if app.line_num < up { 0 } else { app.line_num - up };
-                    }
-
-                    Event::Key(KeyEvent {
-                                   code: KeyCode::Char('g'),
-                                   modifiers: KeyModifiers::NONE,
-                                   ..
-                               }) => {
-                        let mut next: Event = tui.events.next()?;
-                        while let Event::Tick = next {
-                            next = tui.events.next()?;
-                        }
-                        if let Event::Key(KeyEvent {
-                                              code: KeyCode::Char('g'),
-                                              modifiers: KeyModifiers::NONE,
-                                              ..
-                                          }) = next {
-                            app.line_num = 0
-                        }
-                    },
-
-                    Event::Key(KeyEvent {
-                                   code: KeyCode::Char('/'),
-                                   modifiers: KeyModifiers::NONE,
-                                   ..
-                               }) => {
-                        app.mode = UIMode::SearchPopup;
-                        continue
-                    }
-
-                    _ => {}
-                }
-            }
-            UIMode::SearchPopup => {
-                match tui.events.next()? {
-                    Event::Key(KeyEvent {
-                                   code: KeyCode::Char('/'),
-                                   modifiers: KeyModifiers::NONE,
-                                   ..
-                               }) => {
-                        app.mode = UIMode::Viewer;
-                        continue
-                    },
-                    _ => {}
-                }
-            }
+        let updates: Update = handle_input(&app, &tui, tui.events.next()?);
+        match updates {
+            Update::None => {},
+            Update::EditSearchPattern(_) => {},
+            Update::ToggleUIMode => app.toggle_ui_mode(),
+            Update::ScrollViewer(num) => {app.scroll(num);},
+            Update::Quit => app.quit = true
         }
     }
 
