@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::{io, panic};
 use std::str::FromStr;
 use std::io::Read;
@@ -13,7 +14,7 @@ use ratatui::buffer::Buffer;
 use ratatui::style::Style;
 use ratatui::text::Span;
 use tui_textarea::TextArea;
-use crate::{app::{App, UIMode}, event::EventHandler};
+use crate::{app::{App, UIMode, SearchPanelFocus}, event::EventHandler};
 
 pub fn render(view_buffer: Vec<Line>, app: &mut App, frame: &mut Frame) {
     let scroll: u16 = line_num_to_scroll(&view_buffer, app.line_num, frame.size().width - 2);

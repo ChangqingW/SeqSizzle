@@ -4,7 +4,7 @@ use bio::io::fastq;
 use bio::io::fastq::FastqRead;
 use bio::io::fastq::Reader;
 use bio::pattern_matching::myers::Myers;
-use ratatui::prelude::{Line, Color, Span, Style, Modifier};
+use ratatui::prelude::{Line, Color, Span, Style, Modifier, Stylize};
 use ratatui::widgets::{List, ListItem, Block, Borders};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
@@ -21,6 +21,7 @@ pub struct App<'a> {
     pub search_panel: SearchPanel<'a>,
     file: String,
     reader: Reader<std::io::BufReader<std::fs::File>>, // buf_size
+    active_boarder_style: Style,
 }
 
 #[derive(Debug)]
@@ -59,7 +60,7 @@ fn search_patterns_to_list<'a>(search_patterns: &[(String, String, u8)]) -> List
             ]))
         })
         .collect::<Vec<ListItem>>())
-        .block(Block::default().title("Search patterns").borders(Borders::ALL))
+        .block(Block::default().title("Search patterns (ALT-1 to switch)").borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::ITALIC))
         .highlight_symbol(">del ")
 }
@@ -72,11 +73,11 @@ impl SearchPanel<'_> {
             input_distance: TextArea::default(),
         };
         ret.input_pattern.
-            set_block(Block::default().borders(Borders::ALL).title("Search string"));
+            set_block(Block::default().borders(Borders::ALL).title("Search string (ALT-2)"));
         ret.input_color.
-            set_block(Block::default().borders(Borders::ALL).title("Color"));
+            set_block(Block::default().borders(Borders::ALL).title("Color (ALT-3)"));
         ret.input_distance.
-            set_block(Block::default().borders(Borders::ALL).title("Edit distance"));
+            set_block(Block::default().borders(Borders::ALL).title("Edit distance (ALT-4)"));
         ret
     }
 }
@@ -87,7 +88,7 @@ pub enum UIMode {
     SearchPanel(SearchPanelFocus)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum SearchPanelFocus {
     PatternsList,
     InputPattern,
@@ -125,6 +126,7 @@ impl App<'_> {
             search_panel: SearchPanel::new(&default_search_patterns),
             file,
             reader,
+            active_boarder_style: Style::new().red().bold()
         };
         instance.update();
         instance
@@ -155,6 +157,45 @@ impl App<'_> {
             self.line_num = (self.line_num as isize + num) as usize;
             true
         }
+    }
+
+    pub fn focue_search_panel(&mut self, focus: SearchPanelFocus) {
+        if let UIMode::SearchPanel(prev_focus) = &self.mode {
+        match prev_focus{
+            SearchPanelFocus::PatternsList => {
+                self.search_panel.patterns_list = self.search_panel.patterns_list
+                    .clone()
+                    .block(Block::default().
+                           title("Search patterns (ALT-1)")
+                           .borders(Borders::ALL))
+            },
+            SearchPanelFocus::InputPattern => self.search_panel.input_pattern
+                .set_block(Block::default().borders(Borders::ALL).title("Search string (ALT-2)")),
+            SearchPanelFocus::InputColor => self.search_panel.input_color
+                .set_block(Block::default().borders(Borders::ALL).title("Color (ALT-3)")),
+            SearchPanelFocus::InputDistance => self.search_panel.input_distance
+                .set_block(Block::default().borders(Borders::ALL).title("Edit distance (ALT-4)")),
+SearchPanelFocus::InputButton => ()
+        };
+        };
+        match focus {
+            SearchPanelFocus::PatternsList => {
+                self.search_panel.patterns_list = self.search_panel.patterns_list
+                    .clone()
+                    .block(Block::default().
+                           title("Search patterns")
+                           .borders(Borders::ALL)
+                    .border_style(self.active_boarder_style))
+            },
+            SearchPanelFocus::InputPattern => self.search_panel.input_pattern
+                .set_block(Block::default().borders(Borders::ALL).border_style(self.active_boarder_style).title("Search string")),
+            SearchPanelFocus::InputColor => self.search_panel.input_color
+                .set_block(Block::default().borders(Borders::ALL).border_style(self.active_boarder_style).title("Color")),
+            SearchPanelFocus::InputDistance => self.search_panel.input_distance
+                .set_block(Block::default().borders(Borders::ALL).border_style(self.active_boarder_style).title("Edit distance")),
+            SearchPanelFocus::InputButton => ()
+        };
+        self.mode = UIMode::SearchPanel(focus);
     }
 
     pub fn update(&mut self) {

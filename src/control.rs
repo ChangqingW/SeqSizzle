@@ -1,14 +1,16 @@
-use crate::app::{App, SearchPattern, UIMode};
+use crate::app::{App, SearchPattern, UIMode, SearchPanelFocus};
 use crossterm::event::{KeyEvent, KeyModifiers, KeyCode};
 use ratatui::prelude::{Rect};
 use crate::{Tui, Event};
 
 pub enum Update {
-    None,
+    SearchPanelFocus(SearchPanelFocus),
+    SearchPanelInput(SearchPanelFocus, KeyEvent),
     EditSearchPattern(SearchPatternEdit),
     ToggleUIMode,
     ScrollViewer(isize),
     Quit,
+    None,
 }
 
 pub enum SearchPatternEdit {
@@ -37,7 +39,7 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
         _ => {}
     };
 
-    match app.mode {
+    match &app.mode {
         UIMode::Viewer => match input {
             Event::Key(KeyEvent {
                 code: KeyCode::Char('j') | KeyCode::Down,
@@ -81,6 +83,25 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
 
             _ => Update::None,
         },
-        UIMode::SearchPanel(_) => Update::None
+
+
+        UIMode::SearchPanel(focus) => {
+            match input {
+                Event::Key(keyevent) => {
+                   if keyevent.modifiers == KeyModifiers::ALT {
+                       match keyevent.code {
+                           KeyCode::Char('1') => Update::SearchPanelFocus(SearchPanelFocus::PatternsList),
+                           KeyCode::Char('2') => Update::SearchPanelFocus(SearchPanelFocus::InputPattern),
+                           KeyCode::Char('3') => Update::SearchPanelFocus(SearchPanelFocus::InputColor),
+                           KeyCode::Char('4') => Update::SearchPanelFocus(SearchPanelFocus::InputDistance),
+                           _ => Update::None
+                       }
+                   } else {
+                       Update::SearchPanelInput(focus.clone(), keyevent)
+                   } 
+                }
+                _ => Update::None
+            }
+        }
     }
 }

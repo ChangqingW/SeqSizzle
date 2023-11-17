@@ -37,8 +37,23 @@ fn main() -> Result<()> {
             Update::EditSearchPattern(_) => {},
             Update::ToggleUIMode => app.toggle_ui_mode(),
             Update::ScrollViewer(num) => {app.scroll(num);},
-            Update::Quit => app.quit = true
-        }
+            Update::Quit => app.quit = true,
+            Update::SearchPanelFocus(focus) => {
+                println!("Focus changed to: {:?}", focus);
+                app.focue_search_panel(focus);
+            },
+            Update::SearchPanelInput(focus, input) => {
+                match focus {
+                    app::SearchPanelFocus::InputPattern => {
+                        app.search_panel.input_pattern.input(input);
+                        println!("Input to pattern: {:?}", input);
+                    },
+                    app::SearchPanelFocus::InputColor => _ =app.search_panel.input_color.input(input),
+                    app::SearchPanelFocus::InputDistance => _ =app.search_panel.input_distance.input(input),
+                    _ => {}
+                };
+            }
+        };
     }
 
     // Exit the user interface.
