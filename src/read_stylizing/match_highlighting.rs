@@ -7,16 +7,16 @@ use crate::read_stylizing::interval_operations::find_intersections;
 
 use gcollections::ops::set::{Difference};
 
-fn format_overlap<'a, Bound: Width + num_traits::Num>(
-    intervals: &Vec<(IntervalSet<Bound>, &'a str)>,
-    overlap_color: &'a str,
-) -> Vec<(IntervalSet<Bound>, &'a str)> {
+fn format_overlap<Bound: Width + num_traits::Num, Meta: Copy>(
+    intervals: &Vec<(IntervalSet<Bound>, Meta)>,
+    overlap_color: Meta,
+) -> Vec<(IntervalSet<Bound>, Meta)> {
     let overlapped_intervals:IntervalSet<Bound> = find_intersections(&intervals
         .iter()
         .map(|(set, _)| set.clone())
         .collect::<Vec<IntervalSet<Bound>>>());
 
-    let mut result: Vec<(IntervalSet<Bound>, &str)> = Vec::new();
+    let mut result: Vec<(IntervalSet<Bound>, Meta)> = Vec::new();
     for (matches, color) in intervals {
         result.push((matches.difference(&overlapped_intervals), *color))
     }
@@ -26,15 +26,15 @@ fn format_overlap<'a, Bound: Width + num_traits::Num>(
 }
 
 pub fn highlight_matches<'a, T: Width + num_traits::PrimInt>(
-    intervals: &Vec<(IntervalSet<T>, &str)>,
+    intervals: &Vec<(IntervalSet<T>, Color)>,
     input_string: String,
-    overlap_color: &str,
+    overlap_color: Color,
 ) -> Line<'a>
 where
 T: Into<usize>
     {
-    let intervals: Vec<(IntervalSet<T>, &str)> = format_overlap(intervals, overlap_color);
-    let mut intervals: Vec<(usize, usize, &str)> = intervals
+    let intervals: Vec<(IntervalSet<T>, Color)> = format_overlap(intervals, overlap_color);
+    let mut intervals: Vec<(usize, usize, Color)> = intervals
         .into_iter()
         .flat_map(|(set, color)| {
             set.into_iter()
@@ -52,7 +52,7 @@ T: Into<usize>
         if end <= input_string.len() {
             result.push(Span::styled(
                 input_string[start..end ].to_string(),
-                Style::new().fg(Color::from_str(color).unwrap()),
+                Style::new().fg(color),
             ));
         }
         current_index = end;

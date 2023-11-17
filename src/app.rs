@@ -4,8 +4,8 @@ use bio::io::fastq;
 use bio::io::fastq::FastqRead;
 use bio::io::fastq::Reader;
 use bio::pattern_matching::myers::Myers;
-use ratatui::prelude::{Line, Color, Span, Style, Modifier, Stylize};
-use ratatui::widgets::{List, ListItem, Block, Borders};
+use ratatui::prelude::{Line, Color, Span, Style, Modifier, Stylize, Alignment};
+use ratatui::widgets::{List, ListItem, Block, Borders, Paragraph, Wrap};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
 use tui_textarea::TextArea;
@@ -13,7 +13,7 @@ use tui_textarea::TextArea;
 #[derive(Debug)]
 pub struct App<'a> {
     pub quit: bool,
-    pub search_patterns: Vec<(String, String, u8)>,
+    pub search_patterns: Vec<SearchPattern>,
     pub records_buf: Vec<fastq::Record>,
     pub line_buf: Vec<Line<'a>>,
     pub mode: UIMode,
@@ -24,7 +24,7 @@ pub struct App<'a> {
     active_boarder_style: Style,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SearchPattern {
     pub search_string: String,
     pub color: Color,
@@ -45,18 +45,18 @@ pub struct SearchPanel<'a> {
     pub patterns_list: List<'a>,
     pub input_pattern: TextArea<'a>,
     pub input_color: TextArea<'a>,
-    pub input_distance: TextArea<'a>
-//    input_button: dyn Widget
+    pub input_distance: TextArea<'a>,
+    pub input_button: Paragraph<'a>, // dyn Widget
 }
 
-fn search_patterns_to_list<'a>(search_patterns: &[(String, String, u8)]) -> List<'a> {
+fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
     List::new(search_patterns.iter()
-        .map(|(pattern, color, distance)| {
+        .map(|x| {
             ListItem::new(Line::from(vec![
-                Span::from(pattern.clone()),
+                Span::from(x.search_string.clone()),
                 Span::from(", color: "),
-                Span::styled(color.clone(), Style::new().fg(Color::from_str(color).unwrap())),
-                Span::from(format!(", edit-distance: {}", distance))
+                Span::styled(x.color.to_string(), Style::new().fg(x.color)),
+                Span::from(format!(", edit-distance: {}", x.edit_distance))
             ]))
         })
         .collect::<Vec<ListItem>>())
@@ -65,12 +65,13 @@ fn search_patterns_to_list<'a>(search_patterns: &[(String, String, u8)]) -> List
         .highlight_symbol(">del ")
 }
 impl SearchPanel<'_> {
-    pub fn new(search_patterns: &[(String, String, u8)]) -> Self {
+    pub fn new(search_patterns: &[SearchPattern]) -> Self {
         let mut ret = Self {
             patterns_list: search_patterns_to_list(search_patterns),
             input_pattern: TextArea::default(),
             input_color: TextArea::default(),
             input_distance: TextArea::default(),
+            input_button: Paragraph::new("ALT-5 to add pattern\n(Todo: make clickable button and input fields)").alignment(Alignment::Center).block(Block::default().borders(Borders::ALL))
         };
         ret.input_pattern.
             set_block(Block::default().borders(Borders::ALL).title("Search string (ALT-2)"));
@@ -110,11 +111,11 @@ impl App<'_> {
             reader.read(&mut record).expect("Failed to parse record");
         }
         let default_search_patterns = vec![
-            ("CTACACGACGCTCTTCCGATCT".to_string(), "#00FF00".to_string(), 3),
-            ("AGATCGGAAGAGCGTCGTGTAG".to_string(), "#FF0000".to_string(), 3),
-            ("TTTTTTTTTTTT".to_string(), "#00FF00".to_string(), 0),
-            ("AAAAAAAAAAAA".to_string(), "#FF0000".to_string(), 0),
-            ("TCTTCTTTC".to_string(), "#FFC0CB".to_string(), 0),
+            SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3),
+            SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3),
+            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Blue, 0),
+            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Green, 0),
+            SearchPattern::new("TCTTCTTTC".to_string(), Color::Red, 0),
         ];
         let mut instance = App {
             quit: false,
@@ -137,8 +138,15 @@ impl App<'_> {
         self.quit = true;
     }
 
-    pub fn set_search_patterns(&mut self, search_patterns: Vec<(String, String, u8)>) {
+    pub fn set_search_patterns(&mut self, search_patterns: Vec<SearchPattern>) {
         self.search_patterns = search_patterns;
+        self.update();
+    }
+
+    pub fn append_search_pattern(&mut self, pattern: SearchPattern) {
+        self.search_patterns.push(pattern);
+        self.search_panel.patterns_list = search_patterns_to_list(&self.search_patterns);
+        self.update();
     }
 
     pub fn toggle_ui_mode(&mut self) {
@@ -198,22 +206,29 @@ SearchPanelFocus::InputButton => ()
         self.mode = UIMode::SearchPanel(focus);
     }
 
+    pub fn message(&mut self, msg: String) {
+        self.search_panel.input_button = Paragraph::new("ALT-5 to add pattern\n".to_string() + &*msg).
+            alignment(Alignment::Center)
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::ALL));
+    }
+
     pub fn update(&mut self) {
         let mut result: Vec<Line> = Vec::new();
         for record in &self.records_buf {
             let seq = String::from_utf8_lossy(record.seq()).to_string();
 
-            let mut matches: Vec<(IntervalSet<usize>, &str)> = Vec::new();
-            for (pattern, col, dist) in &self.search_patterns {
-                let mut myers = Myers::<u64>::new(pattern.clone().into_bytes());
+            let mut matches: Vec<(IntervalSet<usize>, Color)> = Vec::new();
+            for (x) in &self.search_patterns {
+                let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
                 matches.push((myers
-                                  .find_all(record.seq(), *dist)
+                                  .find_all(record.seq(), x.edit_distance)
                                   .map(|(a, b, _)| (a, b - 1))
                                   .collect::<Vec<(usize, usize)>>()
-                                  .to_interval_set(), col));
+                                  .to_interval_set(), x.color));
             }
             result.push(record.id().to_string().into());
-            result.push(highlight_matches(&matches, seq, "#0000FF"));
+            result.push(highlight_matches(&matches, seq, Color::Gray));
         }
         self.line_buf = result;
     }

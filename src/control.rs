@@ -1,7 +1,9 @@
+use std::str::FromStr;
 use crate::app::{App, SearchPattern, UIMode, SearchPanelFocus};
 use crossterm::event::{KeyEvent, KeyModifiers, KeyCode};
-use ratatui::prelude::{Rect};
+use ratatui::prelude::{Rect, Color};
 use crate::{Tui, Event};
+
 
 pub enum Update {
     SearchPanelFocus(SearchPanelFocus),
@@ -9,6 +11,7 @@ pub enum Update {
     EditSearchPattern(SearchPatternEdit),
     ToggleUIMode,
     ScrollViewer(isize),
+    Msg(String),
     Quit,
     None,
 }
@@ -94,6 +97,18 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
                            KeyCode::Char('2') => Update::SearchPanelFocus(SearchPanelFocus::InputPattern),
                            KeyCode::Char('3') => Update::SearchPanelFocus(SearchPanelFocus::InputColor),
                            KeyCode::Char('4') => Update::SearchPanelFocus(SearchPanelFocus::InputDistance),
+                           KeyCode::Char('5') =>
+                               {
+                                   let search_string: String = app.search_panel.input_pattern.lines().join("");
+                                   let try_color = Color::from_str(&app.search_panel.input_color.lines().join(""));
+                                   let try_u8 = u8::from_str(&app.search_panel.input_distance.lines().join(""));
+                                   match (try_color, try_u8) {
+                                       (Ok(color), Ok(distance)) => {Update::EditSearchPattern(SearchPatternEdit::Append(SearchPattern::new(search_string, color, distance)))},
+                                       (Err(_), Ok(_)) => {Update::Msg("Color needs to be valid hex code".to_string())},
+                                       (Ok(_), Err(_)) => {Update::Msg("Edit distance needs to be valid positive integer".to_string())},
+                                       (Err(_), Err(_)) => {Update::Msg("Color needs to be valid hex code, edit distance needs to be valid positive integer".to_string())},
+                                   }
+                               }
                            _ => Update::None
                        }
                    } else {

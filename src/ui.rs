@@ -83,5 +83,6 @@ impl StatefulWidget for &SearchPanel<'_> {
         self.input_pattern.widget().render(pattern_inputs_areas[0], buf);
         self.input_color.widget().render(pattern_inputs_areas[1], buf);
         self.input_distance.widget().render(pattern_inputs_areas[2], buf);
+        self.input_button.clone().render(pattern_inputs_areas[3], buf);
     }
 }

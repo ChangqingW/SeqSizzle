@@ -12,7 +12,7 @@ use event::{Event, EventHandler};
 use anyhow::Result;
 use std::env;
 use ratatui::prelude::{CrosstermBackend, Terminal};
-use crate::control::{handle_input, Update};
+use crate::control::{handle_input, SearchPatternEdit, Update};
 
 fn main() -> Result<()> {
     // Initialize App
@@ -34,7 +34,6 @@ fn main() -> Result<()> {
         let updates: Update = handle_input(&app, &tui, tui.events.next()?);
         match updates {
             Update::None => {},
-            Update::EditSearchPattern(_) => {},
             Update::ToggleUIMode => app.toggle_ui_mode(),
             Update::ScrollViewer(num) => {app.scroll(num);},
             Update::Quit => app.quit = true,
@@ -52,7 +51,14 @@ fn main() -> Result<()> {
                     app::SearchPanelFocus::InputDistance => _ =app.search_panel.input_distance.input(input),
                     _ => {}
                 };
-            }
+            },
+            Update::EditSearchPattern(edit) => {
+                match edit {
+                    SearchPatternEdit::Append(x) => app.append_search_pattern(x),
+                    _ => () // TODO: implement pattern deletion
+                }
+            },
+            Update::Msg(msg) => app.message(msg)
         };
     }
 
