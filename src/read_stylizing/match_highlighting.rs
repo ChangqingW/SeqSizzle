@@ -1,5 +1,5 @@
 use ratatui::prelude::{Line, Span, Style, Stylize, Color};
-use std::str::FromStr;
+
 use gcollections::ops::Bounded;
 use interval::IntervalSet;
 use interval::ops::Width;

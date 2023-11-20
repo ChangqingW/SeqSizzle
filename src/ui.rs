@@ -1,20 +1,20 @@
-use std::collections::HashMap;
-use std::{io, panic};
-use std::str::FromStr;
-use std::io::Read;
-use bio::bio_types::annot::ParseAnnotError::Splicing;
+
+use std::{io};
+
+
+
 use crate::app::SearchPanel;
 
 pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stderr>>;
 use ratatui::{
-    prelude::{Constraint, Direction, Frame, Layout, Line, Rect, Color, Modifier},
-    widgets::{Block, Borders, Paragraph, Wrap, Clear, List, ListItem, ListState, Widget, StatefulWidget},
+    prelude::{Constraint, Direction, Frame, Layout, Line, Rect},
+    widgets::{Block, Borders, Paragraph, Wrap, Clear, Widget, StatefulWidget},
 };
 use ratatui::buffer::Buffer;
-use ratatui::style::Style;
-use ratatui::text::Span;
-use tui_textarea::TextArea;
-use crate::{app::{App, UIMode, SearchPanelFocus}, event::EventHandler};
+
+
+
+use crate::{app::{App, UIMode}};
 
 pub fn render(view_buffer: Vec<Line>, app: &mut App, frame: &mut Frame) {
     let scroll: u16 = line_num_to_scroll(&view_buffer, app.line_num, frame.size().width - 2);
@@ -66,7 +66,7 @@ pub fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
 
 impl StatefulWidget for &SearchPanel<'_> {
     type State = UIMode;
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut UIMode) {
+    fn render(self, area: Rect, buf: &mut Buffer, _state: &mut UIMode) {
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])

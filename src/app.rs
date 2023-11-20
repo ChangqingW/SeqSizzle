@@ -1,5 +1,5 @@
 use crate::read_stylizing::highlight_matches;
-use std::str::FromStr;
+
 use bio::io::fastq;
 use bio::io::fastq::FastqRead;
 use bio::io::fastq::Reader;
@@ -85,11 +85,11 @@ impl SearchPanel<'_> {
 
 #[derive(Debug, PartialEq)]
 pub enum UIMode {
-    Viewer,
+    Viewer(SearchPanelFocus), // memorize search panel focus
     SearchPanel(SearchPanelFocus)
 }
 
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash, Copy)]
 pub enum SearchPanelFocus {
     PatternsList,
     InputPattern,
@@ -122,13 +122,14 @@ impl App<'_> {
             search_patterns: default_search_patterns.clone(),
             records_buf: records,
             line_buf: Vec::new(),
-            mode: UIMode::Viewer,
+            mode: UIMode::Viewer(SearchPanelFocus::PatternsList),
             line_num: 0,
             search_panel: SearchPanel::new(&default_search_patterns),
             file,
             reader,
             active_boarder_style: Style::new().red().bold()
         };
+        instance.highligh_search_panel_focus(SearchPanelFocus::PatternsList);
         instance.update();
         instance
     }
@@ -145,16 +146,19 @@ impl App<'_> {
 
     pub fn append_search_pattern(&mut self, pattern: SearchPattern) {
         self.search_patterns.push(pattern);
-        self.search_panel.patterns_list = search_patterns_to_list(&self.search_patterns);
+        self.search_panel = SearchPanel::new(&self.search_patterns);
+        match &self.mode {
+            UIMode::SearchPanel(focus) => self.highligh_search_panel_focus(*focus),
+            any => panic!("Unexpected UI mode {:?}", any)
+        };
         self.update();
     }
 
     pub fn toggle_ui_mode(&mut self) {
-        if self.mode == UIMode::Viewer {
-            self.mode = UIMode::SearchPanel(SearchPanelFocus::PatternsList)
-        } else {
-            self.mode = UIMode::Viewer
-        }
+        match &self.mode {
+            UIMode::Viewer(focus) => self.mode = UIMode::SearchPanel(*focus),
+            UIMode::SearchPanel(focus) => self.mode = UIMode::Viewer(*focus)
+        };
     }
 
     pub fn scroll(&mut self, num: isize) -> bool {
@@ -167,14 +171,14 @@ impl App<'_> {
         }
     }
 
-    pub fn focue_search_panel(&mut self, focus: SearchPanelFocus) {
+    fn highligh_search_panel_focus(&mut self, focus: SearchPanelFocus) {
         if let UIMode::SearchPanel(prev_focus) = &self.mode {
         match prev_focus{
             SearchPanelFocus::PatternsList => {
                 self.search_panel.patterns_list = self.search_panel.patterns_list
                     .clone()
                     .block(Block::default().
-                           title("Search patterns (ALT-1)")
+                           title("Search patterns (ALT-1 to switch)")
                            .borders(Borders::ALL))
             },
             SearchPanelFocus::InputPattern => self.search_panel.input_pattern
@@ -191,7 +195,7 @@ SearchPanelFocus::InputButton => ()
                 self.search_panel.patterns_list = self.search_panel.patterns_list
                     .clone()
                     .block(Block::default().
-                           title("Search patterns")
+                           title("Search patterns (ALT-1 to switch)")
                            .borders(Borders::ALL)
                     .border_style(self.active_boarder_style))
             },
@@ -203,6 +207,10 @@ SearchPanelFocus::InputButton => ()
                 .set_block(Block::default().borders(Borders::ALL).border_style(self.active_boarder_style).title("Edit distance")),
             SearchPanelFocus::InputButton => ()
         };
+    }
+
+    pub fn focus_search_panel(&mut self, focus: SearchPanelFocus) {
+        self.highligh_search_panel_focus(focus);
         self.mode = UIMode::SearchPanel(focus);
     }
 
@@ -219,7 +227,7 @@ SearchPanelFocus::InputButton => ()
             let seq = String::from_utf8_lossy(record.seq()).to_string();
 
             let mut matches: Vec<(IntervalSet<usize>, Color)> = Vec::new();
-            for (x) in &self.search_patterns {
+            for x in &self.search_patterns {
                 let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
                 matches.push((myers
                                   .find_all(record.seq(), x.edit_distance)

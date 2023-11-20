@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use crate::app::{App, SearchPattern, UIMode, SearchPanelFocus};
 use crossterm::event::{KeyEvent, KeyModifiers, KeyCode};
-use ratatui::prelude::{Rect, Color};
+use ratatui::prelude::{Color};
 use crate::{Tui, Event};
 
 
@@ -43,7 +43,7 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
     };
 
     match &app.mode {
-        UIMode::Viewer => match input {
+        UIMode::Viewer(_) => match input {
             Event::Key(KeyEvent {
                 code: KeyCode::Char('j') | KeyCode::Down,
                 modifiers: KeyModifiers::NONE,

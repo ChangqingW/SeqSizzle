@@ -1,5 +1,5 @@
 use std::{io, panic};
-use std::panic::panic_any;
+
 use anyhow::Result;
 use crossterm::{
   event::{DisableMouseCapture, EnableMouseCapture},
@@ -7,11 +7,10 @@ use crossterm::{
 };
 pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stderr>>;
 use ratatui::{
-  prelude::{Constraint, Direction, Frame, Layout, Line, Rect},
-  widgets::{Block, Borders, Paragraph, Wrap, Clear},
+  prelude::{Rect},
 };
-use tui_textarea::TextArea;
-use crate::{app::{App, UIMode}, event::EventHandler, ui::{render}};
+
+use crate::{app::{App}, event::EventHandler, ui::{render}};
 
 /// Representation of a terminal user interface.
 ///

@@ -6,7 +6,7 @@ pub mod control;
 pub mod event;
 
 
-use app::{App, UIMode};
+use app::{App};
 use tui::Tui;
 use event::{Event, EventHandler};
 use anyhow::Result;
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
             Update::Quit => app.quit = true,
             Update::SearchPanelFocus(focus) => {
                 println!("Focus changed to: {:?}", focus);
-                app.focue_search_panel(focus);
+                app.focus_search_panel(focus);
             },
             Update::SearchPanelInput(focus, input) => {
                 match focus {
