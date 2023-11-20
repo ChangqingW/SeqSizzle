@@ -205,7 +205,7 @@ impl App<'_> {
         self.update();
         if self.search_patterns.len() == 0 {
             self.mode = UIMode::SearchPanel(SearchPanelState {
-                focus: SearchPanelFocus::InputButton,
+                focus: SearchPanelFocus::PatternsList,
                 patterns_list_selection: None,
             });
         } else if index >= self.search_patterns.len() {
