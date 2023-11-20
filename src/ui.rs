@@ -8,7 +8,7 @@ use crate::app::SearchPanel;
 pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stderr>>;
 use ratatui::{
     prelude::{Constraint, Direction, Frame, Layout, Line, Rect},
-    widgets::{Block, Borders, Paragraph, Wrap, Clear, Widget, StatefulWidget},
+    widgets::{Block, Borders, Paragraph, Wrap, Clear, Widget, StatefulWidget, ListState},
 };
 use ratatui::buffer::Buffer;
 
@@ -66,7 +66,8 @@ pub fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
 
 impl StatefulWidget for &SearchPanel<'_> {
     type State = UIMode;
-    fn render(self, area: Rect, buf: &mut Buffer, _state: &mut UIMode) {
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut UIMode) {
+        let mut list_state = ListState::default().with_selected(state.get_search_panel_state().patterns_list_selection);
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![Constraint::Percentage(80), Constraint::Percentage(20)])
@@ -79,7 +80,7 @@ impl StatefulWidget for &SearchPanel<'_> {
                               Constraint::Percentage(25),
                               Constraint::Percentage(25)])
             .split(layout[1]);
-        Widget::render(self.patterns_list.clone(), patterns_list_area, buf);
+        StatefulWidget::render(self.patterns_list.clone(), patterns_list_area, buf, &mut list_state);
         self.input_pattern.widget().render(pattern_inputs_areas[0], buf);
         self.input_color.widget().render(pattern_inputs_areas[1], buf);
         self.input_distance.widget().render(pattern_inputs_areas[2], buf);

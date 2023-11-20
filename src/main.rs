@@ -38,14 +38,12 @@ fn main() -> Result<()> {
             Update::ScrollViewer(num) => {app.scroll(num);},
             Update::Quit => app.quit = true,
             Update::SearchPanelFocus(focus) => {
-                println!("Focus changed to: {:?}", focus);
                 app.focus_search_panel(focus);
             },
             Update::SearchPanelInput(focus, input) => {
                 match focus {
                     app::SearchPanelFocus::InputPattern => {
                         app.search_panel.input_pattern.input(input);
-                        println!("Input to pattern: {:?}", input);
                     },
                     app::SearchPanelFocus::InputColor => _ =app.search_panel.input_color.input(input),
                     app::SearchPanelFocus::InputDistance => _ =app.search_panel.input_distance.input(input),
@@ -55,10 +53,17 @@ fn main() -> Result<()> {
             Update::EditSearchPattern(edit) => {
                 match edit {
                     SearchPatternEdit::Append(x) => app.append_search_pattern(x),
-                    _ => () // TODO: implement pattern deletion
+                    SearchPatternEdit::Delete(index, pop) => {
+                        if pop {
+                            app.edit_search_pattern(index);
+                        } else {
+                            app.delete_search_pattern(index);
+                        }
+                    }
                 }
             },
-            Update::Msg(msg) => app.message(msg)
+            Update::Msg(msg) => app.message(msg),
+            Update::CycleSearchPattern(reverse) => app.cycle_patterns_list(reverse),
         };
     }
 

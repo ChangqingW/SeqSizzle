@@ -1,7 +1,7 @@
-use interval::interval_set::{IntervalSet};
+use interval::interval_set::{IntervalSet, ToIntervalSet};
 use interval::ops::Width;
 use gcollections::ops::set::{Union, Intersection};
-use gcollections::ops::Empty;
+use gcollections::ops::{Difference, Empty};
 
 pub fn find_intersections<Bound: Width + num_traits::Num>(sets: &[IntervalSet<Bound>]) -> IntervalSet<Bound> {
     sets.iter()
@@ -24,5 +24,5 @@ fn test_find_intersections() {
 fn test_difference() {
     let a: IntervalSet<usize> = vec![(1, 2), (4, 7), (9, 10)].to_interval_set();
     let b: IntervalSet<usize> = vec![(4, 6), (100, 110)].to_interval_set();
-    println!("{:?}", a.difference(&b))
+    assert_eq!(a.difference(&b), vec![(1, 2), (7, 7), (9, 10)].to_interval_set());
 }

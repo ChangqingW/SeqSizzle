@@ -9,6 +9,7 @@ pub enum Update {
     SearchPanelFocus(SearchPanelFocus),
     SearchPanelInput(SearchPanelFocus, KeyEvent),
     EditSearchPattern(SearchPatternEdit),
+    CycleSearchPattern(bool),
     ToggleUIMode,
     ScrollViewer(isize),
     Msg(String),
@@ -17,8 +18,19 @@ pub enum Update {
 }
 
 pub enum SearchPatternEdit {
-    Delete(usize),
+    Delete(usize, bool), // (index, pop into edit boxes?)
     Append(SearchPattern),
+}
+
+fn cycle_focus(focus: SearchPanelFocus, reverse: bool) -> SearchPanelFocus {
+    let list = vec![SearchPanelFocus::PatternsList, SearchPanelFocus::InputPattern, SearchPanelFocus::InputColor, SearchPanelFocus::InputDistance];
+    let mut index = list.iter().position(|&x| x == focus).unwrap();
+    if reverse {
+        index = index.checked_sub(1).unwrap_or(list.len() - 1);
+    } else {
+        index = index.checked_add(1).unwrap_or(0);
+    }
+    list[if index >= list.len() {0} else {index}]
 }
 
 pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
@@ -88,7 +100,7 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
         },
 
 
-        UIMode::SearchPanel(focus) => {
+        UIMode::SearchPanel(state) => {
             match input {
                 Event::Key(keyevent) => {
                    if keyevent.modifiers == KeyModifiers::ALT {
@@ -111,8 +123,27 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
                                }
                            _ => Update::None
                        }
-                   } else {
-                       Update::SearchPanelInput(focus.clone(), keyevent)
+                   } else if keyevent.modifiers == KeyModifiers::NONE && vec![KeyCode::Right, KeyCode::Left].contains(&keyevent.code) {
+                      Update::SearchPanelFocus(cycle_focus(state.focus, keyevent.code == KeyCode::Left)) 
+                   } else if state.focus == SearchPanelFocus::PatternsList {
+                       if keyevent.modifiers == KeyModifiers::NONE && vec![KeyCode::Up, KeyCode::Down].contains(&keyevent.code) {
+                           Update::CycleSearchPattern(keyevent.code == KeyCode::Up) 
+                       } else if keyevent.modifiers == KeyModifiers::NONE && vec![KeyCode::Char('d'), KeyCode::Delete].contains(&keyevent.code) {
+                           match state.patterns_list_selection {
+                               Some(selection) => Update::EditSearchPattern(SearchPatternEdit::Delete(selection , false)),
+                               None => Update::Msg("No pattern selected".to_string())
+                           }
+                       } else if keyevent.modifiers == KeyModifiers::NONE && keyevent.code == KeyCode::Enter {
+                           match state.patterns_list_selection {
+                               Some(selection) => Update::EditSearchPattern(SearchPatternEdit::Delete(selection , true)),
+                               None => Update::Msg("No pattern selected".to_string())
+                           }
+                       } else {
+                           Update::None
+                       }
+                   }
+                   else {
+                       Update::SearchPanelInput(state.focus, keyevent)
                    } 
                 }
                 _ => Update::None
