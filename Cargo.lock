@@ -3,6 +3,20 @@
 version = 3
 
 [[package]]
+name = "SeqSizzle"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bio",
+ "crossterm",
+ "gcollections",
+ "intervallum",
+ "num-traits",
+ "ratatui",
+ "tui-textarea",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -342,20 +356,6 @@ name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
-
-[[package]]
-name = "hello_cargo"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bio",
- "crossterm",
- "gcollections",
- "intervallum",
- "num-traits",
- "ratatui",
- "tui-textarea",
-]
 
 [[package]]
 name = "indexmap"

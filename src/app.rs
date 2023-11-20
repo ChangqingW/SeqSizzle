@@ -203,6 +203,17 @@ impl App<'_> {
             any => panic!("Unexpected UI mode {:?}", any),
         };
         self.update();
+        if self.search_patterns.len() == 0 {
+            self.mode = UIMode::SearchPanel(SearchPanelState {
+                focus: SearchPanelFocus::InputButton,
+                patterns_list_selection: None,
+            });
+        } else if index >= self.search_patterns.len() {
+            self.mode = UIMode::SearchPanel(SearchPanelState {
+                focus: SearchPanelFocus::PatternsList,
+                patterns_list_selection: Some(self.search_patterns.len() - 1),
+            });
+        }
         return pattern;
     }
 
@@ -275,7 +286,7 @@ impl App<'_> {
             SearchPanelFocus::PatternsList => {
                 self.search_panel.patterns_list = self.search_panel.patterns_list.clone().block(
                     Block::default()
-                        .title("Search patterns (ALT-1 to switch)")
+                        .title("Search patterns (ALT-[number] or left / right arrow keys to switch between boxes, up / down to select patterns, enter to edit pattern, delete to delete pattern)")
                         .borders(Borders::ALL)
                         .border_style(self.active_boarder_style),
                 )
