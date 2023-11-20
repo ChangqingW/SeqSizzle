@@ -1,18 +1,17 @@
 pub mod app;
+pub mod control;
+pub mod event;
 pub mod read_stylizing;
 pub mod tui;
 mod ui;
-pub mod control;
-pub mod event;
 
-
-use app::{App};
-use tui::Tui;
-use event::{Event, EventHandler};
-use anyhow::Result;
-use std::env;
-use ratatui::prelude::{CrosstermBackend, Terminal};
 use crate::control::{handle_input, SearchPatternEdit, Update};
+use anyhow::Result;
+use app::App;
+use event::{Event, EventHandler};
+use ratatui::prelude::{CrosstermBackend, Terminal};
+use std::env;
+use tui::Tui;
 
 fn main() -> Result<()> {
     // Initialize App
@@ -33,32 +32,36 @@ fn main() -> Result<()> {
         // Handle events.
         let updates: Update = handle_input(&app, &tui, tui.events.next()?);
         match updates {
-            Update::None => {},
+            Update::None => {}
             Update::ToggleUIMode => app.toggle_ui_mode(),
-            Update::ScrollViewer(num) => {app.scroll(num);},
+            Update::ScrollViewer(num) => {
+                app.scroll(num);
+            }
             Update::Quit => app.quit = true,
             Update::SearchPanelFocus(focus) => {
                 app.focus_search_panel(focus);
-            },
+            }
             Update::SearchPanelInput(focus, input) => {
                 match focus {
                     app::SearchPanelFocus::InputPattern => {
                         app.search_panel.input_pattern.input(input);
-                    },
-                    app::SearchPanelFocus::InputColor => _ =app.search_panel.input_color.input(input),
-                    app::SearchPanelFocus::InputDistance => _ =app.search_panel.input_distance.input(input),
+                    }
+                    app::SearchPanelFocus::InputColor => {
+                        _ = app.search_panel.input_color.input(input)
+                    }
+                    app::SearchPanelFocus::InputDistance => {
+                        _ = app.search_panel.input_distance.input(input)
+                    }
                     _ => {}
                 };
-            },
-            Update::EditSearchPattern(edit) => {
-                match edit {
-                    SearchPatternEdit::Append(x) => app.append_search_pattern(x),
-                    SearchPatternEdit::Delete(index, pop) => {
-                        if pop {
-                            app.edit_search_pattern(index);
-                        } else {
-                            app.delete_search_pattern(index);
-                        }
+            }
+            Update::EditSearchPattern(edit) => match edit {
+                SearchPatternEdit::Append(x) => app.append_search_pattern(x),
+                SearchPatternEdit::Delete(index, pop) => {
+                    if pop {
+                        app.edit_search_pattern(index);
+                    } else {
+                        app.delete_search_pattern(index);
                     }
                 }
             },

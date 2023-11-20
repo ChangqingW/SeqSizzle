@@ -1,20 +1,22 @@
-use ratatui::prelude::{Line, Span, Style, Stylize, Color};
+use ratatui::prelude::{Color, Line, Span, Style, Stylize};
 
-use gcollections::ops::Bounded;
-use interval::IntervalSet;
-use interval::ops::Width;
 use crate::read_stylizing::interval_operations::find_intersections;
+use gcollections::ops::Bounded;
+use interval::ops::Width;
+use interval::IntervalSet;
 
-use gcollections::ops::set::{Difference};
+use gcollections::ops::set::Difference;
 
 fn format_overlap<Bound: Width + num_traits::Num, Meta: Copy>(
     intervals: &Vec<(IntervalSet<Bound>, Meta)>,
     overlap_color: Meta,
 ) -> Vec<(IntervalSet<Bound>, Meta)> {
-    let overlapped_intervals:IntervalSet<Bound> = find_intersections(&intervals
-        .iter()
-        .map(|(set, _)| set.clone())
-        .collect::<Vec<IntervalSet<Bound>>>());
+    let overlapped_intervals: IntervalSet<Bound> = find_intersections(
+        &intervals
+            .iter()
+            .map(|(set, _)| set.clone())
+            .collect::<Vec<IntervalSet<Bound>>>(),
+    );
 
     let mut result: Vec<(IntervalSet<Bound>, Meta)> = Vec::new();
     for (matches, color) in intervals {
@@ -31,19 +33,24 @@ pub fn highlight_matches<'a, T: Width + num_traits::PrimInt>(
     overlap_color: Color,
 ) -> Line<'a>
 where
-T: Into<usize>
-    {
+    T: Into<usize>,
+{
     let intervals: Vec<(IntervalSet<T>, Color)> = format_overlap(intervals, overlap_color);
     let mut intervals: Vec<(usize, usize, Color)> = intervals
         .into_iter()
         .flat_map(|(set, color)| {
-            set.into_iter()
-                .map(move |interval| (interval.lower().into(), interval.upper().into(), color.clone()))
+            set.into_iter().map(move |interval| {
+                (
+                    interval.lower().into(),
+                    interval.upper().into(),
+                    color.clone(),
+                )
+            })
         })
         .collect();
     intervals.sort_by_key(|&(start, _, _)| start);
     let mut result: Vec<Span> = Vec::new();
-    let mut current_index:usize = 0;
+    let mut current_index: usize = 0;
 
     for (start, end, color) in intervals.iter().map(|&(a, b, col)| (a, b + 1, col)) {
         if current_index < start {
@@ -51,7 +58,7 @@ T: Into<usize>
         }
         if end <= input_string.len() {
             result.push(Span::styled(
-                input_string[start..end ].to_string(),
+                input_string[start..end].to_string(),
                 Style::new().fg(color),
             ));
         }
