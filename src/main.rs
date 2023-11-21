@@ -3,6 +3,7 @@ pub mod control;
 pub mod event;
 pub mod read_stylizing;
 pub mod tui;
+pub mod io;
 mod ui;
 
 use crate::control::{handle_input, SearchPatternEdit, Update};
