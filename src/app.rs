@@ -1,14 +1,19 @@
+use crate::io::bifastq::BidirectionalFastqReader;
 use crate::read_stylizing::highlight_matches;
 
 use bio::io::fastq;
-use bio::io::fastq::FastqRead;
-use bio::io::fastq::Reader;
 use bio::pattern_matching::myers::Myers;
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
-use ratatui::prelude::{Alignment, Color, Line, Modifier, Span, Style, Stylize};
+use ratatui::prelude::{Alignment, Color, Line, Modifier, Rect, Span, Style, Stylize};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use std::fs::File;
+use std::path::{Path, PathBuf};
 use tui_textarea::TextArea;
+
+use std::io::{self, Write};
+
+const RECORDS_BUF_SIZE: usize = 100;
 
 #[derive(Debug)]
 pub struct App<'a> {
@@ -17,11 +22,12 @@ pub struct App<'a> {
     pub records_buf: Vec<fastq::Record>,
     pub line_buf: Vec<Line<'a>>,
     pub mode: UIMode,
-    pub line_num: usize,
+    pub line_num: usize, // x2 of records_buf (id + seq) TODO: implement fetching more records
     pub search_panel: SearchPanel<'a>,
-    file: String,
-    reader: Reader<std::io::BufReader<std::fs::File>>, // buf_size
+    file: PathBuf,
+    reader: BidirectionalFastqReader<File>,
     active_boarder_style: Style,
+    buf_bounded: (bool, bool), // buffer reached start / end of file
 }
 
 #[derive(Debug, Clone)]
@@ -134,16 +140,7 @@ pub struct SearchPanelState {
 
 impl App<'_> {
     pub fn new(file: String) -> Self {
-        let mut reader = fastq::Reader::from_file(file.clone()).expect("Failed to open fastq file");
-        let mut record = fastq::Record::new();
-        let mut buf_size = 50;
-        let mut records = Vec::new();
-        reader.read(&mut record).expect("Failed to parse record");
-        while !record.is_empty() && buf_size > 0 {
-            buf_size -= 1;
-            records.push(record.to_owned());
-            reader.read(&mut record).expect("Failed to parse record");
-        }
+        let mut reader = BidirectionalFastqReader::from_path(&Path::new(&file));
         let default_search_patterns = vec![
             SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3),
             SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3),
@@ -154,7 +151,9 @@ impl App<'_> {
         let mut instance = App {
             quit: false,
             search_patterns: default_search_patterns.clone(),
-            records_buf: records,
+            records_buf: reader
+                .next_n(RECORDS_BUF_SIZE)
+                .expect("Failed to parse record"),
             line_buf: Vec::new(),
             mode: UIMode::Viewer(SearchPanelState {
                 focus: SearchPanelFocus::PatternsList,
@@ -162,10 +161,14 @@ impl App<'_> {
             }),
             line_num: 0,
             search_panel: SearchPanel::new(&default_search_patterns),
-            file,
+            file: Path::new(&file).to_path_buf(),
             reader,
             active_boarder_style: Style::new().red().bold(),
+            buf_bounded: (true, false),
         };
+        if instance.records_buf.len() < RECORDS_BUF_SIZE {
+            instance.buf_bounded.1 = true;
+        }
         instance.highligh_search_panel_focus(SearchPanelFocus::PatternsList);
         instance.update();
         instance
@@ -246,13 +249,66 @@ impl App<'_> {
         };
     }
 
-    pub fn scroll(&mut self, num: isize) -> bool {
+    fn scrollable_lines(&self, tui_size: Rect) -> usize {
+        let mut lines = 0;
+        for i in (self.line_num..self.line_buf.len()).rev() {
+            lines += (self.line_buf[i].width() as u16 + tui_size.width - 1) / tui_size.width;
+            if lines + 1 >= tui_size.height {
+                return i - self.line_num + 1;
+            }
+        }
+        0
+    }
+
+    fn buffer_forward(&mut self) {
+        let mut new_records = self.reader.next_n(RECORDS_BUF_SIZE / 4).unwrap();
+        let len = new_records.len();
+        if len < RECORDS_BUF_SIZE / 4 {
+            self.buf_bounded.1 = true;
+        }
+        self.records_buf.append(&mut new_records);
+        self.records_buf =
+            self.records_buf[self.records_buf.len().saturating_sub(RECORDS_BUF_SIZE)..].to_vec();
+        self.line_num = self.line_num.saturating_sub(len * 2);
+        if self.buf_bounded.0 && len > 0 {
+            self.buf_bounded.0 = false;
+        }
+        self.update();
+    }
+
+    fn buffer_backward(&mut self) {
+        let mut new_records = self
+            .reader
+            .prev_n(self.records_buf.len() + (RECORDS_BUF_SIZE / 4))
+            .unwrap();
+        let len = new_records.len();
+        self.reader.rewind_n(len - RECORDS_BUF_SIZE).unwrap();
+        if len < self.records_buf.len() + (RECORDS_BUF_SIZE / 4) {
+            self.buf_bounded.0 = true;
+        }
+        new_records.append(&mut self.records_buf);
+        self.records_buf = new_records[..RECORDS_BUF_SIZE.min(new_records.len())].to_vec();
+        self.line_num += (len - RECORDS_BUF_SIZE) * 2;
+        self.update();
+    }
+
+    pub fn scroll(&mut self, num: isize, tui_rect: Rect) {
+        let scrollable_lines = self.scrollable_lines(tui_rect);
         if num < 0 && (num.abs() as usize > self.line_num) {
             self.line_num = 0;
-            false
+            // false
+        } else if num > scrollable_lines as isize {
+            self.line_num += scrollable_lines;
+            // false
         } else {
             self.line_num = (self.line_num as isize + num) as usize;
-            true
+            // true
+        }
+
+        if scrollable_lines <= 1 && !self.buf_bounded.1 {
+            self.buffer_forward();
+        } else if self.line_num <= 2 && !self.buf_bounded.0 {
+            self.buffer_backward();
         }
     }
 

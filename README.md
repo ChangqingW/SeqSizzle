@@ -1,5 +1,8 @@
-SeqSizzle is a pager for viewing FASTQ files with fuzzy matching, allowing different adaptors to be colored differently.
+SeqSizzle is a pager for viewing FASTQ files with fuzzy matching, allowing different adaptors to be colored differently.  
+[Downloat latest nightly builds for mac / Linux / Windows](https://nightly.link/ChangqingW/SeqSizzle/workflows/rust/master/Binary.zip)  
 
+# Usage
+`./SeqSizzle path_to_fastq_file.fastq`  
 ## Navigation
 ### Viewer mode
 ![Viewer mode](./img/viewer_mode.png)

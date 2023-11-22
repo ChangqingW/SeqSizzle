@@ -36,7 +36,7 @@ fn main() -> Result<()> {
             Update::None => {}
             Update::ToggleUIMode => app.toggle_ui_mode(),
             Update::ScrollViewer(num) => {
-                app.scroll(num);
+                app.scroll(num, tui.size());
             }
             Update::Quit => app.quit = true,
             Update::SearchPanelFocus(focus) => {
