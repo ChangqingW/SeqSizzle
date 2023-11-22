@@ -1,10 +1,9 @@
 use bio::io::fastq;
+use std::env::temp_dir;
 use std::fs::File;
-use std::io::BufRead;
-use std::io::BufReader;
-use std::io::Read;
-use std::io::Seek;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Seek, Write};
+use std::path::PathBuf;
+use uuid::Uuid;
 
 pub struct BidirectionalFastqReader<File> {
     buf_reader: BufReader<File>,
@@ -141,36 +140,45 @@ impl<R: Sized + Read + Seek> BidirectionalFastqReader<R> {
     }
 }
 
-// rm test_parse_record.fastq; cargo test -v
-fn setup_test() -> (File, BidirectionalFastqReader<File>, Vec<fastq::Record>) {
-    let mut file = File::create("test_parse_record.fastq").unwrap();
+#[allow(dead_code)] // It IS used in the tests ffs
+fn setup_test() -> (PathBuf, BidirectionalFastqReader<File>, Vec<fastq::Record>) {
+    let mut file_name = temp_dir();
+    file_name.push(format!("{}.fastq", Uuid::new_v4()));
+    let mut file = File::create(file_name.clone()).unwrap();
     file.write_all(b"@id1\nAAAA\n+\nIIII\n@id2\nTTTT\n+\nIIII\n@id3\nCCCC\n+\nIIII\n")
         .unwrap();
     file.sync_all().unwrap();
-
-    let reader = BidirectionalFastqReader::new(File::open("test_parse_record.fastq").unwrap());
-
+    let reader = BidirectionalFastqReader::new(File::open(file_name.clone()).unwrap());
     let records: Vec<fastq::Record> =
-        fastq::Reader::new(File::open("test_parse_record.fastq").unwrap())
+        fastq::Reader::new(File::open(file_name.clone()).unwrap())
             .records()
             .map(|r| r.unwrap())
             .collect();
 
-    (file, reader, records)
+    (file_name, reader, records)
+}
+
+#[allow(dead_code)]
+fn cleanup_test(file_name: PathBuf) {
+    match std::fs::remove_file(file_name.clone()) {
+        Ok(_) => (),
+        Err(e) => panic!("Error removing test file {}: {:?}", file_name.to_string_lossy(), e),
+    }
 }
 
 #[test]
 fn test_parse_record() {
-    let (_, mut reader, records) = setup_test();
+    let (file_name, mut reader, records) = setup_test();
     assert_eq!(reader.parse_record().unwrap().unwrap(), records[0]);
     assert_eq!(reader.parse_record().unwrap().unwrap(), records[1]);
     assert_eq!(reader.parse_record().unwrap().unwrap(), records[2]);
     assert_eq!(reader.parse_record().unwrap(), None);
+    cleanup_test(file_name);
 }
 
 #[test]
 fn test_seek_to_prev_record() {
-    let (_, mut reader, records) = setup_test();
+    let (file_name, mut reader, records) = setup_test();
     assert_eq!(reader.parse_record().unwrap().unwrap(), records[0]);
     assert_eq!(reader.seek_to_prev_record(), true);
     assert_eq!(reader.parse_record().unwrap().unwrap(), records[0]);
@@ -181,11 +189,12 @@ fn test_seek_to_prev_record() {
     assert_eq!(reader.parse_record().unwrap().unwrap(), records[1]);
     assert_eq!(reader.seek_to_prev_record(), true);
     assert_eq!(reader.parse_record().unwrap().unwrap(), records[1]);
+    cleanup_test(file_name);
 }
 
 #[test]
 fn test_prev_n() {
-    let (_, mut reader, records) = setup_test();
+    let (file_name, mut reader, records) = setup_test();
     assert_eq!(reader.next_n(3).unwrap(), records);
     assert_eq!(
         reader.prev_n(3).unwrap(),
@@ -195,14 +204,16 @@ fn test_prev_n() {
         reader.prev_n(4).unwrap(),
         records.iter().rev().cloned().collect::<Vec<_>>()
     );
+    cleanup_test(file_name);
 }
 
 #[test]
 fn test_rewind_n() {
-    let (_, mut reader, records) = setup_test();
+    let (file_name, mut reader, records) = setup_test();
     assert_eq!(reader.next_n(3).unwrap(), records);
     assert_eq!(reader.rewind_n(4).unwrap(), 3);
     assert_eq!(reader.next_n(3).unwrap(), records);
     assert_eq!(reader.rewind_n(2).unwrap(), 2);
     assert_eq!(reader.next_n(3).unwrap(), records[1..]);
+    cleanup_test(file_name);
 }
