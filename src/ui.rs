@@ -50,10 +50,10 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 pub fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
-        text[..line_num.min(text.len())]
-            .iter()
-            .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
-            .sum()
+    text[..line_num.min(text.len())]
+        .iter()
+        .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
+        .sum()
 }
 
 impl StatefulWidget for &SearchPanel<'_> {

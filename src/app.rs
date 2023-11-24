@@ -13,7 +13,7 @@ use tui_textarea::TextArea;
 
 use std::io::{self, Write};
 
-const RECORDS_BUF_SIZE: usize = 100;
+const RECORDS_BUF_SIZE: usize = 100; // Need to be a multiple of 4
 
 #[derive(Debug)]
 pub struct App<'a> {
@@ -293,23 +293,44 @@ impl App<'_> {
     }
 
     pub fn scroll(&mut self, num: isize, tui_rect: Rect) {
+        if num <= isize::MIN + 1 {
+            self.back_to_top();
+            return;
+        }
         let scrollable_lines = self.scrollable_lines(tui_rect);
         if num < 0 && (num.abs() as usize > self.line_num) {
-            self.line_num = 0;
-            // false
+            match self.buf_bounded.0 {
+                true => self.line_num = 0,
+                false => {
+                    self.buffer_backward();
+                    self.scroll(num, tui_rect);
+                }
+            }
         } else if num > scrollable_lines as isize {
-            self.line_num += scrollable_lines;
-            // false
+            match self.buf_bounded.1 {
+                true => self.line_num += scrollable_lines,
+                false => {
+                    self.buffer_forward();
+                    self.scroll(num, tui_rect);
+                }
+            }
         } else {
             self.line_num = (self.line_num as isize + num) as usize;
-            // true
         }
 
         if scrollable_lines <= 1 && !self.buf_bounded.1 {
             self.buffer_forward();
-        } else if self.line_num <= 2 && !self.buf_bounded.0 {
+        } else if self.line_num <= 1 && !self.buf_bounded.0 {
             self.buffer_backward();
         }
+    }
+
+    pub fn back_to_top(&mut self) {
+        self.reader.rewind_to_start().unwrap();
+        self.records_buf = self.reader.next_n(RECORDS_BUF_SIZE).unwrap();
+        self.line_num = 0;
+        self.buf_bounded = (true, self.records_buf.len() < RECORDS_BUF_SIZE);
+        self.update();
     }
 
     fn highligh_search_panel_focus(&mut self, focus: SearchPanelFocus) {

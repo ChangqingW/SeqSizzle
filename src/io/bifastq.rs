@@ -180,6 +180,11 @@ impl<R: Read + Seek> BidirectionalFastqReader<R> {
     pub fn rewind_n(&mut self, n: usize) -> Result<usize, std::io::Error> {
         rewind_n(&mut self.buf_reader, n)
     }
+
+    pub fn rewind_to_start(&mut self) -> Result<(), std::io::Error> {
+        self.buf_reader.seek(std::io::SeekFrom::Start(0))?;
+        Ok(())
+    }
 }
 
 #[allow(dead_code)] // It IS used in the tests ffs
