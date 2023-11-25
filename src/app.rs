@@ -10,8 +10,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tui_textarea::TextArea;
-
-use std::io::{self, Write};
+use rayon::prelude::*;
 
 const RECORDS_BUF_SIZE: usize = 100; // Need to be a multiple of 4
 
@@ -22,7 +21,7 @@ pub struct App<'a> {
     pub records_buf: Vec<fastq::Record>,
     pub line_buf: Vec<Line<'a>>,
     pub mode: UIMode,
-    pub line_num: usize, // x2 of records_buf (id + seq) TODO: implement fetching more records
+    pub line_num: usize, // x2 of records_buf (id + seq)
     pub search_panel: SearchPanel<'a>,
     file: PathBuf,
     reader: BidirectionalFastqReader<File>,
@@ -444,26 +443,59 @@ impl App<'_> {
                 .block(Block::default().borders(Borders::ALL));
     }
 
-    pub fn update(&mut self) {
+    pub fn update_parallel_inner_ver(&mut self) {
         let mut result: Vec<Line> = Vec::new();
         for record in &self.records_buf {
             let seq = String::from_utf8_lossy(record.seq()).to_string();
 
             let mut matches: Vec<(IntervalSet<usize>, Color)> = Vec::new();
-            for x in &self.search_patterns {
-                let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
-                matches.push((
-                    myers
-                        .find_all(record.seq(), x.edit_distance)
-                        .map(|(a, b, _)| (a, b - 1))
-                        .collect::<Vec<(usize, usize)>>()
-                        .to_interval_set(),
-                    x.color,
-                ));
-            }
+            self.search_patterns
+                .par_iter()
+                .map(|x| {
+                    let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
+                    (
+                        myers
+                            .find_all(record.seq(), x.edit_distance)
+                            .map(|(a, b, _)| (a, b - 1))
+                            .collect::<Vec<(usize, usize)>>()
+                            .to_interval_set(),
+                        x.color,
+                    )
+                })
+                .collect_into_vec(&mut matches);
             result.push(record.id().to_string().into());
             result.push(highlight_matches(&matches, seq, Color::Gray));
         }
         self.line_buf = result;
+    }
+
+    pub fn update(&mut self) { // parallel by record ver
+        self.line_buf = self
+            .records_buf
+            .par_iter()
+            .map(|record| {
+                let seq = String::from_utf8_lossy(record.seq()).to_string();
+                let matches: Vec<(IntervalSet<usize>, Color)> = self
+                    .search_patterns
+                    .iter()
+                    .map(|x| {
+                        let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
+                        (
+                            myers
+                                .find_all(record.seq(), x.edit_distance)
+                                .map(|(a, b, _)| (a, b - 1))
+                                .collect::<Vec<(usize, usize)>>()
+                                .to_interval_set(),
+                            x.color,
+                        )
+                    })
+                    .collect::<Vec<(IntervalSet<usize>, Color)>>();
+                (
+                    record.id().to_string().into(),
+                    highlight_matches(&matches, seq, Color::Gray),
+                )
+            })
+            .flat_map(|(id, seq)| vec![id, seq])
+            .collect();
     }
 }

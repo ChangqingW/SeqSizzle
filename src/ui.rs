@@ -1,15 +1,9 @@
-use std::io;
-
-use crate::app::SearchPanel;
-
-pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stderr>>;
-use ratatui::buffer::Buffer;
 use ratatui::{
-    prelude::{Constraint, Direction, Frame, Layout, Line, Rect},
+    prelude::{Constraint, Direction, Frame, Layout, Line, Rect, Buffer},
     widgets::{Block, Borders, Clear, ListState, Paragraph, StatefulWidget, Widget, Wrap},
 };
-
-use crate::app::{App, UIMode};
+use crate::app::{App, UIMode, SearchPanel};
+use rayon::prelude::*;
 
 pub fn render(view_buffer: Vec<Line>, app: &mut App, frame: &mut Frame) {
     let scroll: u16 = line_num_to_scroll(&view_buffer, app.line_num, frame.size().width - 2);
@@ -51,7 +45,7 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 pub fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
     text[..line_num.min(text.len())]
-        .iter()
+        .par_iter()
         .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
         .sum()
 }
