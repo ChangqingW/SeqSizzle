@@ -259,6 +259,7 @@ impl App<'_> {
         0
     }
 
+    // TODO: buffer_forward and buffer_backward only need partial update on line_buf 
     fn buffer_forward(&mut self) {
         let mut new_records = self.reader.next_n(RECORDS_BUF_SIZE / 4).unwrap();
         let len = new_records.len();

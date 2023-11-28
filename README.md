@@ -12,5 +12,18 @@ Up / down arrow (or `j` / `k`) to scroll by one line, `Ctrl+U` / `Ctrl+D` to sco
 ### search panel mode
 ![Search panel mode](./img/search_panel.png)
 Left / right arrow to cycle between different input fields, or `ALT+num` to jump to a specific field.  
-When on the patterns list field, up / down arrows cycle through patterns, backspace to delete the selected pattern and return to pop the pattern into the input fields for editing.  
+When on the patterns list field, up / down arrows cycle through patterns, `D` to delete the selected pattern and return to pop the pattern into the input fields for editing.  
 `ALT+5` to add current inputs into the search pattern list.
+
+# Roadmap
+## functionality 
+ * With exact match, discard surrounding fuzzy match.  
+ * Gzip (`fastq.gz`) support  
+  - FASTA / regular text file support?  
+ * Filter reads by match  
+ * Counting reads with match  
+## UI
+ * Arguments to start with default common primers (10x, Nanopore etc.)  
+ * Make elements in the search panel clickable, try implementations discussed in [ratatui repo](https://github.com/ratatui-org/ratatui/discussions/552)  
+## Misc
+ * Unit tests  
