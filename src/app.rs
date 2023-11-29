@@ -2,7 +2,7 @@ use crate::io::bifastq::BidirectionalFastqReader;
 use crate::read_stylizing::highlight_matches;
 
 use bio::io::fastq;
-use bio::pattern_matching::myers::Myers;
+use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
 use ratatui::prelude::{Alignment, Color, Line, Modifier, Rect, Span, Style, Stylize};
@@ -10,7 +10,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use rayon::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use tui_textarea::{TextArea, CursorMove};
+use tui_textarea::{CursorMove, TextArea};
 
 const RECORDS_BUF_SIZE: usize = 100; // Need to be a multiple of 4
 
@@ -242,12 +242,20 @@ impl App<'_> {
                 .title("Edit distance (ALT-4)"),
         );
 
-        self.search_panel.input_pattern.move_cursor(CursorMove::Bottom);
-        self.search_panel.input_color.move_cursor(CursorMove::Bottom);
-        self.search_panel.input_distance.move_cursor(CursorMove::Bottom);
+        self.search_panel
+            .input_pattern
+            .move_cursor(CursorMove::Bottom);
+        self.search_panel
+            .input_color
+            .move_cursor(CursorMove::Bottom);
+        self.search_panel
+            .input_distance
+            .move_cursor(CursorMove::Bottom);
         self.search_panel.input_pattern.move_cursor(CursorMove::End);
         self.search_panel.input_color.move_cursor(CursorMove::End);
-        self.search_panel.input_distance.move_cursor(CursorMove::End);
+        self.search_panel
+            .input_distance
+            .move_cursor(CursorMove::End);
     }
 
     pub fn toggle_ui_mode(&mut self) {
@@ -268,23 +276,33 @@ impl App<'_> {
         0
     }
 
-    // TODO: buffer_forward and buffer_backward only need partial update on line_buf
     fn buffer_forward(&mut self) {
-        let mut new_records = self.reader.next_n(RECORDS_BUF_SIZE / 4).unwrap();
+        // Grab 25% more records
+        let new_records = self.reader.next_n(RECORDS_BUF_SIZE / 4).unwrap();
         let len = new_records.len();
         if len < RECORDS_BUF_SIZE / 4 {
             self.buf_bounded.1 = true;
         }
-        self.records_buf.append(&mut new_records);
+
+        // append to buffer and resize to RECORDS_BUF_SIZE again
+        self.records_buf.append(&mut new_records.clone());
         self.records_buf =
             self.records_buf[self.records_buf.len().saturating_sub(RECORDS_BUF_SIZE)..].to_vec();
-        self.line_num = self.line_num.saturating_sub(len * 2);
+
+        self.line_buf.append(&mut Self::record_to_lines(
+            &new_records,
+            &self.search_patterns,
+        ));
+        self.line_buf =
+            self.line_buf[self.line_buf.len().saturating_sub(RECORDS_BUF_SIZE)..].to_vec();
+
+        self.line_num = self.line_num.saturating_sub(len * 2); // id + seq
         if self.buf_bounded.0 && len > 0 {
             self.buf_bounded.0 = false;
         }
-        self.update();
     }
 
+    // TODO: buffer_backward only need partial update on line_buf
     fn buffer_backward(&mut self) {
         let mut new_records = self
             .reader
@@ -315,7 +333,7 @@ impl App<'_> {
                     self.scroll(num, tui_rect);
                 }
             }
-        } else if num > scrollable_lines as isize {
+        } else if num >= scrollable_lines as isize {
             match self.buf_bounded.1 {
                 true => self.line_num += scrollable_lines,
                 false => {
@@ -327,11 +345,6 @@ impl App<'_> {
             self.line_num = (self.line_num as isize + num) as usize;
         }
 
-        if scrollable_lines <= 1 && !self.buf_bounded.1 {
-            self.buffer_forward();
-        } else if self.line_num <= 1 && !self.buf_bounded.0 {
-            self.buffer_backward();
-        }
         self.scroll_num =
             Self::line_num_to_scroll(&self.line_buf, self.line_num, tui_rect.width - 2);
     }
@@ -469,53 +482,23 @@ impl App<'_> {
             .sum()
     }
 
-    pub fn update_parallel_inner_ver(&mut self) {
-        let mut result: Vec<Line> = Vec::new();
-        for record in &self.records_buf {
-            let seq = String::from_utf8_lossy(record.seq()).to_string();
-
-            let mut matches: Vec<(IntervalSet<usize>, Color)> = Vec::new();
-            self.search_patterns
-                .par_iter()
-                .map(|x| {
-                    let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
-                    (
-                        myers
-                            .find_all(record.seq(), x.edit_distance)
-                            .map(|(a, b, _)| (a, b - 1))
-                            .collect::<Vec<(usize, usize)>>()
-                            .to_interval_set(),
-                        x.color,
-                    )
-                })
-                .collect_into_vec(&mut matches);
-            result.push(record.id().to_string().into());
-            result.push(highlight_matches(&matches, seq, Color::Gray));
-        }
-        self.line_buf = result;
+    pub fn update(&mut self) {
+        // update all records in buffer
+        self.line_buf = Self::record_to_lines(&self.records_buf, &self.search_patterns);
     }
 
-    pub fn update(&mut self) {
-        // parallel by record ver
-        self.line_buf = self
-            .records_buf
+    fn record_to_lines<'a>(
+        records: &[fastq::Record],
+        search_patterns: &[SearchPattern],
+    ) -> Vec<Line<'a>> {
+        // parallel by record
+        records
             .par_iter()
             .map(|record| {
                 let seq = String::from_utf8_lossy(record.seq()).to_string();
-                let matches: Vec<(IntervalSet<usize>, Color)> = self
-                    .search_patterns
+                let matches: Vec<(IntervalSet<usize>, Color)> = search_patterns
                     .iter()
-                    .map(|x| {
-                        let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
-                        (
-                            myers
-                                .find_all(record.seq(), x.edit_distance)
-                                .map(|(a, b, _)| (a, b - 1))
-                                .collect::<Vec<(usize, usize)>>()
-                                .to_interval_set(),
-                            x.color,
-                        )
-                    })
+                    .map(|x| (Self::search(record, x), x.color))
                     .collect::<Vec<(IntervalSet<usize>, Color)>>();
                 (
                     record.id().to_string().into(),
@@ -523,6 +506,53 @@ impl App<'_> {
                 )
             })
             .flat_map(|(id, seq)| vec![id, seq])
-            .collect();
+            .collect()
+    }
+
+    fn search(record: &fastq::Record, pattern: &SearchPattern) -> IntervalSet<usize> {
+        if pattern.search_string.len() > 64 {
+            panic!("Search pattern need to be less than 64 symbols long");
+        }
+        if pattern.search_string.len() < 8 {
+            Self::search_generic::<u8>(record, pattern)
+        } else if pattern.search_string.len() < 16 {
+            Self::search_generic::<u16>(record, pattern)
+        } else if pattern.search_string.len() < 32 {
+            Self::search_generic::<u32>(record, pattern)
+        } else {
+            Self::search_generic::<u64>(record, pattern)
+        }
+    }
+
+    fn search_generic<T: BitVec>(
+        record: &fastq::Record,
+        pattern: &SearchPattern,
+    ) -> IntervalSet<usize>
+    where
+        <T as BitVec>::DistType: From<u8>,
+    {
+        let mut builder = MyersBuilder::new();
+        for (base, equivalents) in vec![
+            (b'M', &b"AC"[..]),
+            (b'R', &b"AG"[..]),
+            (b'W', &b"AT"[..]),
+            (b'S', &b"CG"[..]),
+            (b'Y', &b"CT"[..]),
+            (b'K', &b"GT"[..]),
+            (b'V', &b"ACGMRS"[..]),
+            (b'H', &b"ACTMWY"[..]),
+            (b'D', &b"AGTRWK"[..]),
+            (b'B', &b"CGTSYK"[..]),
+            (b'N', &b"ACGTMRWSYKVHDB"[..]),
+        ] {
+            builder.ambig(base, equivalents);
+        }
+
+        let mut myers: Myers<T> = builder.build(pattern.search_string.clone().into_bytes());
+        myers
+            .find_all(record.seq(), pattern.edit_distance.into())
+            .map(|(a, b, _)| (a, b - 1))
+            .collect::<Vec<(usize, usize)>>()
+            .to_interval_set()
     }
 }
