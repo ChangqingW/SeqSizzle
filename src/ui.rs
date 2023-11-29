@@ -3,15 +3,13 @@ use ratatui::{
     widgets::{Block, Borders, Clear, ListState, Paragraph, StatefulWidget, Widget, Wrap},
 };
 use crate::app::{App, UIMode, SearchPanel};
-use rayon::prelude::*;
 
 pub fn render(view_buffer: Vec<Line>, app: &mut App, frame: &mut Frame) {
-    let scroll: u16 = line_num_to_scroll(&view_buffer, app.line_num, frame.size().width - 2);
     frame.render_widget(
         Paragraph::new(view_buffer)
             .block(Block::default().borders(Borders::ALL))
             .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
+            .scroll((app.scroll_num, 0)),
         frame.size(),
     );
     if let UIMode::SearchPanel(_) = app.mode {
@@ -43,12 +41,6 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-pub fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
-    text[..line_num.min(text.len())]
-        .par_iter()
-        .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
-        .sum()
-}
 
 impl StatefulWidget for &SearchPanel<'_> {
     type State = UIMode;

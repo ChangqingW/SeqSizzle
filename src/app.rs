@@ -7,10 +7,10 @@ use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
 use ratatui::prelude::{Alignment, Color, Line, Modifier, Rect, Span, Style, Stylize};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use rayon::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tui_textarea::TextArea;
-use rayon::prelude::*;
 
 const RECORDS_BUF_SIZE: usize = 100; // Need to be a multiple of 4
 
@@ -22,6 +22,7 @@ pub struct App<'a> {
     pub line_buf: Vec<Line<'a>>,
     pub mode: UIMode,
     pub line_num: usize, // x2 of records_buf (id + seq)
+    pub scroll_num: u16, // Ratatui paragraph scroll by wrapped line num
     pub search_panel: SearchPanel<'a>,
     file: PathBuf,
     reader: BidirectionalFastqReader<File>,
@@ -159,6 +160,7 @@ impl App<'_> {
                 patterns_list_selection: Some(0),
             }),
             line_num: 0,
+            scroll_num: 0,
             search_panel: SearchPanel::new(&default_search_patterns),
             file: Path::new(&file).to_path_buf(),
             reader,
@@ -259,7 +261,7 @@ impl App<'_> {
         0
     }
 
-    // TODO: buffer_forward and buffer_backward only need partial update on line_buf 
+    // TODO: buffer_forward and buffer_backward only need partial update on line_buf
     fn buffer_forward(&mut self) {
         let mut new_records = self.reader.next_n(RECORDS_BUF_SIZE / 4).unwrap();
         let len = new_records.len();
@@ -323,6 +325,8 @@ impl App<'_> {
         } else if self.line_num <= 1 && !self.buf_bounded.0 {
             self.buffer_backward();
         }
+        self.scroll_num =
+            Self::line_num_to_scroll(&self.line_buf, self.line_num, tui_rect.width - 2);
     }
 
     pub fn back_to_top(&mut self) {
@@ -444,6 +448,19 @@ impl App<'_> {
                 .block(Block::default().borders(Borders::ALL));
     }
 
+    pub fn resized_update(&mut self, tui_rect: Rect) {
+        // handle resize event
+        self.scroll_num =
+            Self::line_num_to_scroll(&self.line_buf, self.line_num, tui_rect.width - 2);
+    }
+
+    fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
+        text[..line_num.min(text.len())]
+            .par_iter()
+            .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
+            .sum()
+    }
+
     pub fn update_parallel_inner_ver(&mut self) {
         let mut result: Vec<Line> = Vec::new();
         for record in &self.records_buf {
@@ -470,7 +487,8 @@ impl App<'_> {
         self.line_buf = result;
     }
 
-    pub fn update(&mut self) { // parallel by record ver
+    pub fn update(&mut self) {
+        // parallel by record ver
         self.line_buf = self
             .records_buf
             .par_iter()

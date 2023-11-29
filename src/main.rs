@@ -35,6 +35,9 @@ fn main() -> Result<()> {
         match updates {
             Update::None => {}
             Update::ToggleUIMode => app.toggle_ui_mode(),
+            Update::WindowResize(rect) => {
+                app.resized_update(rect);
+            }
             Update::ScrollViewer(num) => {
                 app.scroll(num, tui.size());
             }

@@ -1,7 +1,7 @@
 use crate::app::{App, SearchPanelFocus, SearchPattern, UIMode};
 use crate::{Event, Tui};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::prelude::Color;
+use ratatui::prelude::{Color, Rect};
 use std::str::FromStr;
 
 pub enum Update {
@@ -11,6 +11,7 @@ pub enum Update {
     CycleSearchPattern(bool),
     ToggleUIMode,
     ScrollViewer(isize),
+    WindowResize(Rect),
     Msg(String),
     Quit,
     None,
@@ -53,7 +54,8 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
             UIMode::Viewer(_) => handle_input_viewer(app, tui, keyevent),
             UIMode::SearchPanel(_) => handle_input_search_panel(app, tui, keyevent),
         },
-        _ => Update::None, // TODO: refactor: recalculate scroll only on resize
+        Event::Resize(_, _) => Update::WindowResize(tui.size()),
+        _ => Update::None,
     }
 }
 
