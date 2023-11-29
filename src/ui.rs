@@ -7,7 +7,7 @@ use crate::app::{App, UIMode, SearchPanel};
 pub fn render(view_buffer: Vec<Line>, app: &mut App, frame: &mut Frame) {
     frame.render_widget(
         Paragraph::new(view_buffer)
-            .block(Block::default().borders(Borders::ALL))
+            .block(Block::default().borders(Borders::ALL).title(app.file.to_str().unwrap_or("SeqSizzle")))
             .wrap(Wrap { trim: false })
             .scroll((app.scroll_num, 0)),
         frame.size(),

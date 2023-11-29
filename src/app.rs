@@ -10,7 +10,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use rayon::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use tui_textarea::TextArea;
+use tui_textarea::{TextArea, CursorMove};
 
 const RECORDS_BUF_SIZE: usize = 100; // Need to be a multiple of 4
 
@@ -24,7 +24,7 @@ pub struct App<'a> {
     pub line_num: usize, // x2 of records_buf (id + seq)
     pub scroll_num: u16, // Ratatui paragraph scroll by wrapped line num
     pub search_panel: SearchPanel<'a>,
-    file: PathBuf,
+    pub file: PathBuf,
     reader: BidirectionalFastqReader<File>,
     active_boarder_style: Style,
     buf_bounded: (bool, bool), // buffer reached start / end of file
@@ -241,6 +241,13 @@ impl App<'_> {
                 .borders(Borders::ALL)
                 .title("Edit distance (ALT-4)"),
         );
+
+        self.search_panel.input_pattern.move_cursor(CursorMove::Bottom);
+        self.search_panel.input_color.move_cursor(CursorMove::Bottom);
+        self.search_panel.input_distance.move_cursor(CursorMove::Bottom);
+        self.search_panel.input_pattern.move_cursor(CursorMove::End);
+        self.search_panel.input_color.move_cursor(CursorMove::End);
+        self.search_panel.input_distance.move_cursor(CursorMove::End);
     }
 
     pub fn toggle_ui_mode(&mut self) {
