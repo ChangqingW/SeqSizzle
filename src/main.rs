@@ -25,15 +25,14 @@ fn main() -> Result<()> {
     let events = EventHandler::new(250);
     let mut tui = Tui::new(terminal, events);
     tui.enter()?;
+    tui.draw(&mut app)?;
 
     // Start the main loop.
     while !app.quit {
-        // Render the user interface.
-        tui.draw(&mut app)?;
         // Handle events.
         let updates: Update = handle_input(&app, &tui, tui.events.next()?);
         match updates {
-            Update::None => {}
+            Update::None => continue, // no need to re-draw
             Update::ToggleUIMode => app.toggle_ui_mode(),
             Update::WindowResize(rect) => {
                 app.resized_update(rect);
@@ -41,7 +40,10 @@ fn main() -> Result<()> {
             Update::ScrollViewer(num) => {
                 app.scroll(num, tui.size());
             }
-            Update::Quit => app.quit = true,
+            Update::Quit => {
+                app.quit = true;
+                break;
+            }
             Update::SearchPanelFocus(focus) => {
                 app.focus_search_panel(focus);
             }
@@ -72,6 +74,9 @@ fn main() -> Result<()> {
             Update::Msg(msg) => app.message(msg),
             Update::CycleSearchPattern(reverse) => app.cycle_patterns_list(reverse),
         };
+
+        // Render the user interface.
+        tui.draw(&mut app)?;
     }
 
     // Exit the user interface.

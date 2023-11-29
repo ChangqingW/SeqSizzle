@@ -333,6 +333,7 @@ impl App<'_> {
         self.reader.rewind_to_start().unwrap();
         self.records_buf = self.reader.next_n(RECORDS_BUF_SIZE).unwrap();
         self.line_num = 0;
+        self.scroll_num = 0;
         self.buf_bounded = (true, self.records_buf.len() < RECORDS_BUF_SIZE);
         self.update();
     }
