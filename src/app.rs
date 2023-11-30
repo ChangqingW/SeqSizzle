@@ -303,13 +303,16 @@ impl App<'_> {
     }
 
     // TODO: buffer_backward only need partial update on line_buf
+    // not worth the effort?
     fn buffer_backward(&mut self) {
         let mut new_records = self
             .reader
             .prev_n(self.records_buf.len() + (RECORDS_BUF_SIZE / 4))
             .unwrap();
         let len = new_records.len();
-        self.reader.rewind_n(len - RECORDS_BUF_SIZE).unwrap();
+        //self.reader.rewind_n(len - RECORDS_BUF_SIZE).unwrap();
+        // TODO: fix line number error in scrolling
+        _ = self.reader.next_n(self.records_buf.len());
         if len < self.records_buf.len() + (RECORDS_BUF_SIZE / 4) {
             self.buf_bounded.0 = true;
         }
