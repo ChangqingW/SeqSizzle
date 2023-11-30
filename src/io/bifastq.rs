@@ -107,6 +107,7 @@ fn rewind_n<R: Read + Seek>(
     Ok(n)
 }
 
+// TODO: not the most efficient, it's better to return an iterator
 fn next_n<R: Read + Seek>(
     buf_reader: &mut BufReader<R>,
     n: usize,

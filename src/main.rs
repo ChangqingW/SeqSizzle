@@ -1,4 +1,5 @@
 pub mod app;
+pub mod buffer;
 pub mod control;
 pub mod event;
 pub mod io;

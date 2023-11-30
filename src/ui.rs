@@ -1,19 +1,59 @@
+use crate::{
+    app::{App, SearchPanel, UIMode},
+    buffer::Read,
+};
 use ratatui::{
-    prelude::{Constraint, Direction, Frame, Layout, Line, Rect, Buffer},
+    prelude::{Buffer, Constraint, Direction, Frame, Layout, Line, Rect},
     widgets::{Block, Borders, Clear, ListState, Paragraph, StatefulWidget, Widget, Wrap},
 };
-use crate::app::{App, UIMode, SearchPanel};
 use rayon::prelude::*;
 
-pub fn render(view_buffer: Vec<Line>, app: &mut App, frame: &mut Frame) {
-    let scroll: u16 = line_num_to_scroll(&view_buffer, app.line_num, frame.size().width - 2);
-    frame.render_widget(
-        Paragraph::new(view_buffer)
-            .block(Block::default().borders(Borders::ALL))
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
-        frame.size(),
-    );
+pub fn render(app: &mut App, frame: &mut Frame) {
+    // let scroll: u16 = line_num_to_scroll(&view_buffer, app.line_num, frame.size().width - 2);
+    let size = frame.size();
+
+    // get scroll status
+    let (mut read, line) = app.scroll_status;
+    if let Some(current_read) = app.records.get_index(read) {
+        let mut current_height = current_read.calculate_height(size.width) - line;
+        // we subtract a further 1 to avoid cases where there will be a gap
+        if current_height != 0 {
+            current_height -= 1;
+        }
+
+        // first, let's render the topmost read
+        frame.render_widget(
+            current_read
+                .paragraph
+                .clone()
+                .scroll((line.try_into().unwrap(), 0)),
+            frame.size(),
+        );
+
+        // TODO: implement this as a ReadBufferIterator
+        read += 1;
+        loop {
+            if let Some(r) = app.records.get_index(read) {
+                if current_height >= size.height {
+                    break;
+                }
+
+                let old_size = size.clone();
+                let mut new_size = old_size.clone();
+                new_size.y = current_height + 1;
+                new_size.height -= new_size.y;
+                frame.render_widget(r.paragraph.clone().scroll((0, 0)), new_size);
+
+                let height = r.clone().calculate_height(size.width.into());
+                current_height += height;
+
+                read += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
     if let UIMode::SearchPanel(_) = app.mode {
         let center_area = centered_rect(80, 80, frame.size());
         frame.render_widget(Clear, center_area);
