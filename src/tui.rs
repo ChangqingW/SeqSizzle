@@ -47,11 +47,10 @@ impl Tui {
     /// [`Draw`]: tui::Terminal::draw
     /// [`rendering`]: crate::ui:render
     pub fn draw(&mut self, app: &mut App) -> Result<()> {
-        if app.line_buf.is_empty() {
-            panic!("No lines in app.line_buf!\n{:?}", app)
-        }
-        self.terminal
-            .draw(|frame| render(app.line_buf.clone(), app, frame))?;
+        // if app.line_buf.is_empty() {
+        // panic!("No lines in app.line_buf!\n{:?}", app)
+        // }
+        self.terminal.draw(|frame| render(app, frame))?;
         Ok(())
     }
 

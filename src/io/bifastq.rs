@@ -147,7 +147,6 @@ fn read_to_pos<R: Read + Seek>(
     Ok(buff)
 }
 
-
 #[cfg(not(debug_assertions))]
 static RECORD_BUF_SIZE: usize = 1024 * 1024; // 1MB
 #[cfg(not(debug_assertions))]
@@ -158,16 +157,12 @@ static RECORD_BUF_SIZE: usize = 20;
 #[cfg(debug_assertions)]
 static READER_BUF_SIZE: usize = RECORD_BUF_SIZE * 4 * 300;
 
-#[test]
-fn test_buf_size() {
-    assert_eq!(RECORD_BUF_SIZE, 4);
-}
-
 #[derive(Debug, Clone)]
 struct BufferedRecord {
     record: fastq::Record,
     file_position: u64,
 }
+
 #[derive(Debug)]
 pub struct BidirectionalFastqReader<R: Read + Seek> {
     buf_reader: BufReader<R>,

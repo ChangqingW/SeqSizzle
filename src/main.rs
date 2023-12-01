@@ -1,4 +1,5 @@
 pub mod app;
+pub mod buffer;
 pub mod control;
 pub mod event;
 pub mod io;
@@ -35,7 +36,8 @@ fn main() -> Result<()> {
             Update::None => continue, // no need to re-draw
             Update::ToggleUIMode => app.toggle_ui_mode(),
             Update::WindowResize(rect) => {
-                app.resized_update(rect);
+                todo!();
+                //app.resized_update(rect);
             }
             Update::ScrollViewer(num) => {
                 app.scroll(num, tui.size());

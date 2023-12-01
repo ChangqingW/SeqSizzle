@@ -1,3 +1,4 @@
+use crate::buffer::{Read, ReadBuffer};
 use crate::io::bifastq::BidirectionalFastqReader;
 use crate::read_stylizing::highlight_matches;
 
@@ -12,25 +13,20 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use tui_textarea::{CursorMove, TextArea};
 
-#[cfg(debug_assertions)]
-const RECORDS_BUF_SIZE: usize = 24; // Need to be a multiple of 4
-#[cfg(not(debug_assertions))]
-const RECORDS_BUF_SIZE: usize = 100; // Need to be a multiple of 4
-
 #[derive(Debug)]
 pub struct App<'a> {
     pub quit: bool,
     pub search_patterns: Vec<SearchPattern>,
-    pub records_buf: Vec<fastq::Record>,
-    pub line_buf: Vec<Line<'a>>,
+    pub records: ReadBuffer<'a>,
+
     pub mode: UIMode,
     pub line_num: usize, // x2 of records_buf (id + seq)
-    pub scroll_num: u16, // Ratatui paragraph scroll by wrapped line num
     pub search_panel: SearchPanel<'a>,
-    pub file: PathBuf,
-    reader: BidirectionalFastqReader<File>,
+    // file: PathBuf,
+    // reader: BidirectionalFastqReader<File>,
+    // buf_bounded: (bool, bool), // buffer reached start / end of file
     active_boarder_style: Style,
-    buf_bounded: (bool, bool), // buffer reached start / end of file
+    pub scroll_status: (usize, u16),
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +76,7 @@ fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
     .highlight_style(Style::default().add_modifier(Modifier::BOLD))
     .highlight_symbol("> ")
 }
+
 impl SearchPanel<'_> {
     pub fn new(search_patterns: &[SearchPattern]) -> Self {
         let mut ret = Self {
@@ -143,7 +140,6 @@ pub struct SearchPanelState {
 
 impl App<'_> {
     pub fn new(file: String) -> Self {
-        let mut reader = BidirectionalFastqReader::from_path(&Path::new(&file));
         let default_search_patterns = vec![
             SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3),
             SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3),
@@ -154,25 +150,16 @@ impl App<'_> {
         let mut instance = App {
             quit: false,
             search_patterns: default_search_patterns.clone(),
-            records_buf: reader
-                .next_n(RECORDS_BUF_SIZE)
-                .expect("Failed to parse record"),
-            line_buf: Vec::new(),
+            records: ReadBuffer::new(file),
             mode: UIMode::Viewer(SearchPanelState {
                 focus: SearchPanelFocus::PatternsList,
                 patterns_list_selection: Some(0),
             }),
             line_num: 0,
-            scroll_num: 0,
             search_panel: SearchPanel::new(&default_search_patterns),
-            file: Path::new(&file).to_path_buf(),
-            reader,
             active_boarder_style: Style::new().red().bold(),
-            buf_bounded: (true, false),
+            scroll_status: (0, 0),
         };
-        if instance.records_buf.len() < RECORDS_BUF_SIZE {
-            instance.buf_bounded.1 = true;
-        }
         instance.highligh_search_panel_focus(SearchPanelFocus::PatternsList);
         instance.update();
         instance
@@ -268,103 +255,96 @@ impl App<'_> {
         };
     }
 
-    fn scrollable_lines(&self, tui_size: Rect) -> usize {
-        let mut lines = 0;
-        for i in (self.line_num..self.line_buf.len()).rev() {
-            lines += (self.line_buf[i].width() as u16 + tui_size.width - 1) / tui_size.width;
-            if lines + 1 >= tui_size.height {
-                return i - self.line_num + 1;
+    pub fn scroll(&mut self, n: isize, rect: Rect) {
+        // current location:
+        let width = rect.width;
+        let mut read = self.scroll_status.0 as i16;
+        let line = u16::try_from(self.scroll_status.1).unwrap();
+
+        // do we need to scroll up?
+        if n < 0 {
+            let mut n_up = u16::try_from(-n).unwrap(); // easier to think of a positive number of lines to scroll up
+
+            // are we staying within the same read?
+            if n_up <= line {
+                self.scroll_status.1 -= n_up;
+                return;
             }
-        }
-        0
-    }
+            n_up -= line;
 
-    fn buffer_forward(&mut self) {
-        // Grab 25% more records
-        let new_records = self.reader.next_n(RECORDS_BUF_SIZE / 4).unwrap();
-        let len = new_records.len();
-        if len < RECORDS_BUF_SIZE / 4 {
-            self.buf_bounded.1 = true;
-        }
-
-        // append to buffer and resize to RECORDS_BUF_SIZE again
-        self.records_buf.append(&mut new_records.clone());
-        self.records_buf =
-            self.records_buf[self.records_buf.len().saturating_sub(RECORDS_BUF_SIZE)..].to_vec();
-
-        self.line_buf.append(&mut Self::record_to_lines(
-            &new_records,
-            &self.search_patterns,
-        ));
-        self.line_buf =
-            self.line_buf[self.line_buf.len().saturating_sub(RECORDS_BUF_SIZE)..].to_vec();
-
-        self.line_num = self.line_num.saturating_sub(len * 2); // id + seq
-        if self.buf_bounded.0 && len > 0 {
-            self.buf_bounded.0 = false;
-        }
-    }
-
-    // TODO: buffer_backward only need partial update on line_buf
-    // not worth the effort?
-    fn buffer_backward(&mut self) {
-        let mut new_records = self
-            .reader
-            .prev_n(self.records_buf.len() + (RECORDS_BUF_SIZE / 4))
-            .unwrap();
-        let len = new_records.len();
-        //self.reader.rewind_n(len - RECORDS_BUF_SIZE).unwrap();
-        // TODO: fix line number error in scrolling
-        _ = self.reader.next_n(self.records_buf.len());
-        if len < self.records_buf.len() + (RECORDS_BUF_SIZE / 4) {
-            self.buf_bounded.0 = true;
-        }
-        new_records.append(&mut self.records_buf);
-        self.records_buf = new_records[..RECORDS_BUF_SIZE.min(new_records.len())].to_vec();
-        self.line_num += (len - RECORDS_BUF_SIZE) * 2;
-        self.update();
-    }
-
-    // TODO: fix buffer forward causing scrolling more than num
-    pub fn scroll(&mut self, num: isize, tui_rect: Rect) {
-        if num <= isize::MIN + 1 {
-            self.back_to_top();
-            return;
-        }
-        let scrollable_lines = self.scrollable_lines(tui_rect);
-        if num < 0 && (num.abs() as usize > self.line_num) {
-            match self.buf_bounded.0 {
-                true => self.line_num = 0,
-                false => {
-                    self.buffer_backward();
-                    self.scroll(num, tui_rect);
+            // if not, let's scroll 'up'
+            read -= 1;
+            loop {
+                if read < 0 {
+                    // reached the end of the file, there is no scrolling to be done
+                    self.scroll_status = (0, 0);
                     return;
                 }
-            }
-        } else if num >= scrollable_lines as isize {
-            match self.buf_bounded.1 {
-                true => self.line_num += scrollable_lines,
-                false => {
-                    self.buffer_forward();
-                    self.scroll(num, tui_rect);
+
+                let new_read = self
+                    .records
+                    .get_index(read as usize)
+                    .expect("This should never fail");
+                let height = new_read.calculate_height(width);
+                if n_up <= height {
+                    self.scroll_status = (read as usize, height - n_up);
                     return;
                 }
+                n_up -= height;
+                read -= 1;
             }
         } else {
-            self.line_num = (self.line_num as isize + num) as usize;
+            let mut n = u16::try_from(n).unwrap(); // type conversion
+
+            // are we staying within the same read?
+            let height = self
+                .records
+                .get_index(read as usize)
+                .expect("Reading should never fail from the current read")
+                .calculate_height(width);
+            if n + line <= height {
+                self.scroll_status.1 += n;
+                return;
+            }
+
+            // if not, let's scroll up a bit
+            n -= height - line;
+            read += 1;
+            loop {
+                if read < 0 {
+                    // reached the end of the file, there is no scrolling to be done
+                    self.scroll_status = (0, 0);
+                    return;
+                }
+                if let Some(new_read) = self.records.get_index(read as usize) {
+                    let height = new_read.calculate_height(width);
+                    if n <= height {
+                        self.scroll_status = (read as usize, n);
+                        return;
+                    }
+                    n -= height;
+                    read += 1;
+                }
+            }
         }
 
-        self.scroll_num =
-            Self::line_num_to_scroll(&self.line_buf, self.line_num, tui_rect.width - 2);
+        // always make sure to have 5 reads buffered
     }
 
     pub fn back_to_top(&mut self) {
-        self.reader.rewind_to_start().unwrap();
-        self.records_buf = self.reader.next_n(RECORDS_BUF_SIZE).unwrap();
-        self.line_num = 0;
-        self.scroll_num = 0;
-        self.buf_bounded = (true, self.records_buf.len() < RECORDS_BUF_SIZE);
-        self.update();
+        todo!();
+        // self.reader.rewind_to_start().unwrap();
+        // self.records_buf = self
+        //     .reader
+        //     .next_n(RECORDS_BUF_SIZE)
+        //     .unwrap()
+        //     .into_iter()
+        //     .map(|x| Read::new(x))
+        //     .collect();
+
+        // self.line_num = 0;
+        // self.buf_bounded = (true, self.records_buf.len() < RECORDS_BUF_SIZE);
+        // self.update();
     }
 
     fn highligh_search_panel_focus(&mut self, focus: SearchPanelFocus) {
@@ -478,24 +458,39 @@ impl App<'_> {
                 .block(Block::default().borders(Borders::ALL));
     }
 
-    pub fn resized_update(&mut self, tui_rect: Rect) {
-        // handle resize event
-        self.scroll_num =
-            Self::line_num_to_scroll(&self.line_buf, self.line_num, tui_rect.width - 2);
-    }
-
-    fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
-        text[..line_num]
-            .par_iter()
-            .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
-            .sum()
-    }
-
     pub fn update(&mut self) {
-        // update all records in buffer
-        self.line_buf = Self::record_to_lines(&self.records_buf, &self.search_patterns);
+        // parallel by record ver
+        self.records.reads.par_iter_mut().for_each(|read| {
+            let seq = String::from_utf8_lossy(read.read.seq()).to_string();
+            let matches: Vec<(IntervalSet<usize>, Color)> = self
+                .search_patterns
+                .iter()
+                .map(|x| {
+                    let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
+                    (
+                        myers
+                            .find_all(read.read.seq(), x.edit_distance)
+                            .map(|(a, b, _)| (a, b - 1))
+                            .collect::<Vec<(usize, usize)>>()
+                            .to_interval_set(),
+                        x.color,
+                    )
+                })
+                .collect::<Vec<(IntervalSet<usize>, Color)>>();
+
+            read.lines = vec![
+                Line::raw(read.read.id().to_string()),
+                highlight_matches(&matches, seq, Color::Gray),
+            ];
+            read.render();
+            // read.lines.clear();
+            // read.lines.push(Line::raw(read.read.id().to_string()));
+            // read.lines
+            //     .push(highlight_matches(&matches, seq, Color::Gray))
+        });
     }
 
+    // TODO: refactor
     fn record_to_lines<'a>(
         records: &[fastq::Record],
         search_patterns: &[SearchPattern],
