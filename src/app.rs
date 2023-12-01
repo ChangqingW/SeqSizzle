@@ -12,6 +12,9 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use tui_textarea::{CursorMove, TextArea};
 
+#[cfg(debug_assertions)]
+const RECORDS_BUF_SIZE: usize = 24; // Need to be a multiple of 4
+#[cfg(not(debug_assertions))]
 const RECORDS_BUF_SIZE: usize = 100; // Need to be a multiple of 4
 
 #[derive(Debug)]
@@ -322,6 +325,7 @@ impl App<'_> {
         self.update();
     }
 
+    // TODO: fix buffer forward causing scrolling more than num
     pub fn scroll(&mut self, num: isize, tui_rect: Rect) {
         if num <= isize::MIN + 1 {
             self.back_to_top();
@@ -334,6 +338,7 @@ impl App<'_> {
                 false => {
                     self.buffer_backward();
                     self.scroll(num, tui_rect);
+                    return;
                 }
             }
         } else if num >= scrollable_lines as isize {
@@ -342,6 +347,7 @@ impl App<'_> {
                 false => {
                     self.buffer_forward();
                     self.scroll(num, tui_rect);
+                    return;
                 }
             }
         } else {
@@ -479,7 +485,7 @@ impl App<'_> {
     }
 
     fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
-        text[..line_num.min(text.len())]
+        text[..line_num]
             .par_iter()
             .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
             .sum()

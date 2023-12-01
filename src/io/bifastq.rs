@@ -6,6 +6,11 @@ use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+/// Parse a fastq record from a BufReader
+///
+/// Assumes the file pointer is at the start of a record
+/// Reads 4 lines from the BufReader and parses them into a fastq::Record
+/// Returns None if EOF is reached, Error if the lines are not valid fastq
 fn parse_record<R: Read>(
     buf_reader: &mut BufReader<R>,
 ) -> Result<Option<fastq::Record>, std::io::Error> {
@@ -49,7 +54,12 @@ fn parse_record<R: Read>(
     }
 }
 
-fn try_next <R: Read + Seek>(
+/// Try to parse a fastq record from a BufReader
+///
+/// Try reading 7 lines from the BufReader and
+/// workout the start of a fastq record
+/// calls next if the start of a record is found
+fn try_next<R: Read + Seek>(
     buf_reader: &mut BufReader<R>,
 ) -> Result<BufferedRecord, std::io::Error> {
     let mut lines = Vec::with_capacity(8);
@@ -58,28 +68,22 @@ fn try_next <R: Read + Seek>(
         let pos = buf_reader.stream_position()?;
         match buf_reader.read_line(&mut line) {
             Ok(0) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("try_parse_record EOF reached after {} lines", i),
-                    ));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("try_parse_record EOF reached after {} lines", i),
+                ));
             }
             Ok(_) => lines.push((line, pos)),
             Err(e) => return Err(e),
         }
     }
     for i in 0..4 {
-        if lines[i].0.starts_with('@') && lines[i + 2].0.starts_with('+') {
+        if lines[i].0.starts_with('@')
+            && lines[i + 2].0.starts_with('+')
+            && lines[i + 1].0.len() == lines[i + 3].0.len()
+        {
             buf_reader.seek(std::io::SeekFrom::Start(lines[i].1))?;
-            return Ok(
-                BufferedRecord {
-                    record: fastq::Record::with_attrs(
-                                &lines[i].0.trim_end()[1..],
-                                None,
-                                &lines[i + 1].0.trim_end().as_bytes(),
-                                &lines[i + 3].0.trim_end().as_bytes()
-                                ),
-                    file_position: lines[i].1
-                })
+            return Ok(next(buf_reader).unwrap().unwrap());
         }
     }
     Err(std::io::Error::new(
@@ -88,8 +92,11 @@ fn try_next <R: Read + Seek>(
     ))
 }
 
-
-fn next <R: Read + Seek>( buf_reader: &mut BufReader<R>) -> Result<Option<BufferedRecord>, std::io::Error> {
+/// Parse a fastq record from a BufReader
+/// and return the record and the file position
+fn next<R: Read + Seek>(
+    buf_reader: &mut BufReader<R>,
+) -> Result<Option<BufferedRecord>, std::io::Error> {
     let pos = buf_reader.stream_position()?;
     let rec: Option<fastq::Record> = parse_record(buf_reader)?;
     if rec.is_some() {
@@ -99,42 +106,63 @@ fn next <R: Read + Seek>( buf_reader: &mut BufReader<R>) -> Result<Option<Buffer
         }))
     } else {
         Ok(None)
-    } 
+    }
 }
 
-fn read_to_pos <R: Read + Seek>(buf_reader: &mut BufReader<R>, pos: u64) -> Result<VecDeque<BufferedRecord>, std::io::Error> {
-    let mut buff : VecDeque<BufferedRecord> = VecDeque::with_capacity(RECORD_BUF_SIZE + 1);
+/// Read records from a BufReader until the given position is reached
+fn read_to_pos<R: Read + Seek>(
+    buf_reader: &mut BufReader<R>,
+    pos: u64,
+) -> Result<VecDeque<BufferedRecord>, std::io::Error> {
+    let mut buff: VecDeque<BufferedRecord> = VecDeque::with_capacity(RECORD_BUF_SIZE + 1);
     buff.push_back(try_next(buf_reader)?);
     loop {
         let res: Option<BufferedRecord> = next(buf_reader)?;
         match res {
             Some(rec) => {
-                if rec.file_position == pos {
+                let current_pos = buf_reader.stream_position()?;
+                if current_pos == pos {
                     buff.push_back(rec);
                     break;
-                } else if rec.file_position > pos {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "read_to_pos exceeded given pos",
-                        ));
+                } else if current_pos > pos {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "read_to_pos exceeded given pos",
+                    ));
                 } else {
                     buff.push_back(rec);
                     if buff.len() >= RECORD_BUF_SIZE {
                         buff.pop_front();
                     }
                 }
-            },
-            None => {return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid data found in read_to_pos",
-            ));}
+            }
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid data found in read_to_pos",
+                ));
+            }
         }
     }
     Ok(buff)
 }
 
-static READER_BUF_SIZE: usize = 1024 * 1024; // 1MB
-static RECORD_BUF_SIZE: usize = 2000;
+
+#[cfg(not(debug_assertions))]
+static RECORD_BUF_SIZE: usize = 1024 * 1024; // 1MB
+#[cfg(not(debug_assertions))]
+static READER_BUF_SIZE: usize = 2000;
+
+#[cfg(debug_assertions)]
+static RECORD_BUF_SIZE: usize = 20;
+#[cfg(debug_assertions)]
+static READER_BUF_SIZE: usize = RECORD_BUF_SIZE * 4 * 300;
+
+#[test]
+fn test_buf_size() {
+    assert_eq!(RECORD_BUF_SIZE, 4);
+}
+
 #[derive(Debug, Clone)]
 struct BufferedRecord {
     record: fastq::Record,
@@ -143,7 +171,7 @@ struct BufferedRecord {
 #[derive(Debug)]
 pub struct BidirectionalFastqReader<R: Read + Seek> {
     buf_reader: BufReader<R>,
-    backwards_records_buffer: VecDeque<BufferedRecord>
+    backwards_records_buffer: VecDeque<BufferedRecord>,
 }
 
 // Constructor for File
@@ -176,7 +204,8 @@ impl<R: Read + Seek> BidirectionalFastqReader<R> {
         if res.is_none() {
             Ok(None)
         } else {
-            self.backwards_records_buffer.push_back(res.clone().unwrap());
+            self.backwards_records_buffer
+                .push_back(res.clone().unwrap());
             if self.backwards_records_buffer.len() > RECORD_BUF_SIZE {
                 self.backwards_records_buffer.pop_front();
             }
@@ -184,16 +213,17 @@ impl<R: Read + Seek> BidirectionalFastqReader<R> {
         }
     }
 
+    /// returns the previous record and moves the file pointer to the start of
+    /// the returned record
     pub fn prev(&mut self) -> Result<Option<fastq::Record>, std::io::Error> {
-        // returns the previous record and moves the file pointer to the start of 
-        // the returned record
         if self.buf_reader.stream_position()? == 0 {
             return Ok(None);
         }
         let poped = self.backwards_records_buffer.pop_back();
         match poped {
             Some(record) => {
-                self.buf_reader.seek(std::io::SeekFrom::Start(record.file_position))?;
+                self.buf_reader
+                    .seek(std::io::SeekFrom::Start(record.file_position))?;
                 Ok(Some(record.record))
             }
             None => {
@@ -201,16 +231,16 @@ impl<R: Read + Seek> BidirectionalFastqReader<R> {
                 // usize(u32/u64) to u64
                 let current_pos = self.buf_reader.stream_position()?;
                 let seek = if current_pos > READER_BUF_SIZE as u64 {
-                   std::io::SeekFrom::Current(-(READER_BUF_SIZE as i64))
+                    std::io::SeekFrom::Current(-(READER_BUF_SIZE as i64))
                 } else {
                     std::io::SeekFrom::Start(0)
                 };
                 self.buf_reader.seek(seek)?;
                 self.backwards_records_buffer = read_to_pos(&mut self.buf_reader, current_pos)?;
-                self.backwards_records_buffer.pop_back().unwrap();
                 match self.backwards_records_buffer.pop_back() {
                     Some(record) => {
-                        self.buf_reader.seek(std::io::SeekFrom::Start(record.file_position))?;
+                        self.buf_reader
+                            .seek(std::io::SeekFrom::Start(record.file_position))?;
                         Ok(Some(record.record))
                     }
                     None => {
@@ -220,9 +250,9 @@ impl<R: Read + Seek> BidirectionalFastqReader<R> {
                         ))
                     }
                 }
-                }
             }
         }
+    }
 
     pub fn next_n(&mut self, n: usize) -> Result<Vec<fastq::Record>, std::io::Error> {
         let mut records: Vec<fastq::Record> = Vec::with_capacity(n);
@@ -263,13 +293,24 @@ impl<R: Read + Seek> BidirectionalFastqReader<R> {
     }
 }
 
-#[allow(dead_code)] // It IS used in the tests ffs
+#[allow(dead_code)]
 fn setup_test() -> (PathBuf, BidirectionalFastqReader<File>, Vec<fastq::Record>) {
     let mut file_name = temp_dir();
     file_name.push(format!("{}.fastq", Uuid::new_v4()));
     let mut file = File::create(file_name.clone()).unwrap();
-    file.write_all(b"@id1\nAAAA\n+\nIIII\n@id2\nTTTT\n+\nIIII\n@id3\nCCCC\n+\nIIII\n")
-        .unwrap();
+    file.write_all(
+        b"@id1\nAAAA\n+\nIIII\n\
+                     @id2\nTTTT\n+\nIIII\n\
+                     @id3\nCCCC\n+\nIIII\n\
+                     @id4\nGGGG\n+\nIIII\n\
+                     @id5\nACCC\n+\nIIII\n\
+                     @id6\nCACC\n+\nIIII\n\
+                     @id7\nCCAC\n+\nIIII\n\
+                     @id8\nCCCA\n+\nIIII\n\
+                     @id9\nTCCC\n+\nIIII\n\
+                     @id10\nCTCC\n+\nIIII\n",
+    )
+    .unwrap();
     file.sync_all().unwrap();
     let reader = BidirectionalFastqReader::new(File::open(file_name.clone()).unwrap());
     let records: Vec<fastq::Record> = fastq::Reader::new(File::open(file_name.clone()).unwrap())
@@ -295,29 +336,29 @@ fn cleanup_test(file_name: PathBuf) {
 #[test]
 fn test_parse_record() {
     let (file_name, mut reader, records) = setup_test();
-    assert_eq!(reader.next().unwrap().unwrap(), records[0]);
-    assert_eq!(reader.next().unwrap().unwrap(), records[1]);
-    assert_eq!(reader.next().unwrap().unwrap(), records[2]);
+    for i in 0..10 {
+        assert_eq!(reader.next().unwrap().unwrap(), records[i]);
+    }
     assert_eq!(reader.next().unwrap(), None);
     cleanup_test(file_name);
 }
 
-// #[test]
-// fn test_prev_n() {
-//     let (file_name, mut reader, records) = setup_test();
-//     assert_eq!(reader.next_n(3).unwrap(), records);
-//     assert_eq!(reader.prev_n(4).unwrap(), records);
-//     assert_eq!(reader.prev_n(4).unwrap(), Vec::<fastq::Record>::new());
-//     assert_eq!(reader.next_n(2).unwrap(), records[..2]);
-//     assert_eq!(reader.prev_n(2).unwrap(), records[..2]);
-//     cleanup_test(file_name);
-// }
+#[test]
+fn test_prev_n_1() {
+    let (file_name, mut reader, records) = setup_test();
+    assert_eq!(reader.next_n(20).unwrap(), records);
+    assert_eq!(reader.prev_n(4).unwrap(), records[6..]);
+    assert_eq!(reader.prev_n(4).unwrap(), records[2..6]);
+    assert_eq!(reader.prev_n(4).unwrap(), records[..2]);
+    assert_eq!(reader.next_n(2).unwrap(), records[..2]);
+    cleanup_test(file_name);
+}
 
 #[test]
-fn test_prev_n() {
+fn test_prev_n_2() {
     let (file_name, mut reader, records) = setup_test();
-    assert_eq!(reader.next_n(3).unwrap(), records);
-    assert_eq!(reader.prev_n(2).unwrap(), records[1..]);
+    assert_eq!(reader.next_n(3).unwrap(), records[..3]);
+    assert_eq!(reader.prev_n(2).unwrap(), records[1..3]);
     assert_eq!(reader.prev_n(2).unwrap(), records[0..1]);
     cleanup_test(file_name);
 }
