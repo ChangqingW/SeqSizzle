@@ -19,47 +19,28 @@ const BUFFER_AMOUNT: usize = 5;
 #[derive(Debug, Clone)]
 pub struct Read<'a> {
     pub read: fastq::Record,
-    pub lines: Vec<Line<'a>>,     // raw line buffer data
-    pub paragraph: Paragraph<'a>, // line buffer data, split to width
-    pub height: u16,
+    pub lines: Option<Vec<Line<'a>>>    // highlighted lines
 }
 
 impl<'a> Read<'a> {
     pub fn new(read: fastq::Record) -> Self {
-        let lines = vec![
-            read.id().to_string().into(),
-            String::from_utf8_lossy(read.seq()).to_string().into()
-        ];
-
-        let mut obj = Self {
+        Self {
             read,
-            lines,
-            paragraph: Paragraph::new("not yet rendered"),
-            height: 0,
-        };
-
-        obj.render();
-        return obj;
-    }
-
-    pub fn render(&mut self) {
-        self.paragraph = Paragraph::new(self.lines.clone())
-            .wrap(Wrap { trim: false })
-            .scroll((0, 0));
+            lines: None,
+        }
     }
 
     pub fn calculate_height(&self, width: u16) -> u16 {
         assert_ne!(width, 0);
 
         self.lines
+            .as_ref()
+            .expect("No updates performed on read yet!")
             .iter()
             .map(|line| u16::try_from(line.width().div_ceil(width as usize)).unwrap())
             .sum()
     }
 
-    pub fn reflow(&mut self) {
-        todo!();
-    }
 }
 
 #[derive(Debug)]
@@ -71,6 +52,22 @@ pub struct ReadBuffer<'a> {
     offset: i16, // every time we discard reads to save memory, we adjust offset so it always represents the global read idx in the file
     max_index: Option<usize>,
 }
+
+// TODO: No idea how the lifetime annotations work
+pub struct ReadIterator<'a, 'b> {
+    inner: &'a mut ReadBuffer<'b>,
+    index: usize,
+}
+impl <'a, 'b>Iterator for ReadIterator<'a, 'b> {
+    type Item = Read<'b>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let read = self.inner.get_index(self.index);
+        self.index += 1;
+        read.cloned()
+    }
+}
+
 
 impl<'a> ReadBuffer<'a> {
     pub fn new(file: String) -> Self {
@@ -169,10 +166,8 @@ impl<'a> ReadBuffer<'a> {
             //      existing vec len   len of extra buffer on the end
             .unwrap();
 
-        // rewind reader head
-        self.reader
-            .prev_n(RECORDS_BUF_SIZE)
-            .unwrap();
+        // TODO: fix scrolling when buffer forwarded skipping lines
+        // rewind reader head?
 
         for record in new_records {
             if self.reads.len() >= MAX_BUFFER_READ_COUNT {
@@ -180,6 +175,13 @@ impl<'a> ReadBuffer<'a> {
             }
             self.reads.push_front(Read::new(record));
             self.offset -= 1;
+        }
+    }
+
+    pub fn iter_from(&mut self, index: usize) -> ReadIterator<'_, 'a> {
+        ReadIterator {
+            inner: self,
+            index,
         }
     }
 }

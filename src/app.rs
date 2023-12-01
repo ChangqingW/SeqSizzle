@@ -161,7 +161,7 @@ impl App<'_> {
             scroll_status: (0, 0),
         };
         instance.highligh_search_panel_focus(SearchPanelFocus::PatternsList);
-        instance.update();
+        instance.update(true);
         instance
     }
 
@@ -172,7 +172,7 @@ impl App<'_> {
 
     pub fn set_search_patterns(&mut self, search_patterns: Vec<SearchPattern>) {
         self.search_patterns = search_patterns;
-        self.update();
+        self.update(true);
     }
 
     pub fn append_search_pattern(&mut self, pattern: SearchPattern) {
@@ -184,7 +184,7 @@ impl App<'_> {
             }
             any => panic!("Unexpected UI mode {:?}", any),
         };
-        self.update();
+        self.update(true);
     }
 
     pub fn delete_search_pattern(&mut self, index: usize) -> SearchPattern {
@@ -196,7 +196,7 @@ impl App<'_> {
             }
             any => panic!("Unexpected UI mode {:?}", any),
         };
-        self.update();
+        self.update(true);
         if self.search_patterns.len() == 0 {
             self.mode = UIMode::SearchPanel(SearchPanelState {
                 focus: SearchPanelFocus::PatternsList,
@@ -458,59 +458,23 @@ impl App<'_> {
                 .block(Block::default().borders(Borders::ALL));
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, patterns_changed: bool) {
         // parallel by record ver
-        self.records.reads.par_iter_mut().for_each(|read| {
+        self.records.reads.par_iter_mut()
+            .filter(|read| read.lines.is_none() || patterns_changed)
+            .for_each(|read| {
             let seq = String::from_utf8_lossy(read.read.seq()).to_string();
             let matches: Vec<(IntervalSet<usize>, Color)> = self
                 .search_patterns
                 .iter()
-                .map(|x| {
-                    let mut myers = Myers::<u64>::new(x.search_string.clone().into_bytes());
-                    (
-                        myers
-                            .find_all(read.read.seq(), x.edit_distance)
-                            .map(|(a, b, _)| (a, b - 1))
-                            .collect::<Vec<(usize, usize)>>()
-                            .to_interval_set(),
-                        x.color,
-                    )
-                })
+                .map(|x| (Self::search(&read.read, x), x.color))
                 .collect::<Vec<(IntervalSet<usize>, Color)>>();
 
-            read.lines = vec![
+            read.lines = Some(vec![
                 Line::raw(read.read.id().to_string()),
                 highlight_matches(&matches, seq, Color::Gray),
-            ];
-            read.render();
-            // read.lines.clear();
-            // read.lines.push(Line::raw(read.read.id().to_string()));
-            // read.lines
-            //     .push(highlight_matches(&matches, seq, Color::Gray))
+            ]);
         });
-    }
-
-    // TODO: refactor
-    fn record_to_lines<'a>(
-        records: &[fastq::Record],
-        search_patterns: &[SearchPattern],
-    ) -> Vec<Line<'a>> {
-        // parallel by record
-        records
-            .par_iter()
-            .map(|record| {
-                let seq = String::from_utf8_lossy(record.seq()).to_string();
-                let matches: Vec<(IntervalSet<usize>, Color)> = search_patterns
-                    .iter()
-                    .map(|x| (Self::search(record, x), x.color))
-                    .collect::<Vec<(IntervalSet<usize>, Color)>>();
-                (
-                    record.id().to_string().into(),
-                    highlight_matches(&matches, seq, Color::Gray),
-                )
-            })
-            .flat_map(|(id, seq)| vec![id, seq])
-            .collect()
     }
 
     fn search(record: &fastq::Record, pattern: &SearchPattern) -> IntervalSet<usize> {

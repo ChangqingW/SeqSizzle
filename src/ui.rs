@@ -1,7 +1,4 @@
-use crate::{
-    app::{App, SearchPanel, UIMode},
-    buffer::Read,
-};
+use crate::app::{App, SearchPanel, UIMode};
 use ratatui::{
     prelude::{Buffer, Constraint, Direction, Frame, Layout, Line, Rect},
     widgets::{Block, Borders, Clear, ListState, Paragraph, StatefulWidget, Widget, Wrap},
@@ -9,55 +6,27 @@ use ratatui::{
 use rayon::prelude::*;
 
 pub fn render(app: &mut App, frame: &mut Frame) {
-    // let scroll: u16 = line_num_to_scroll(&view_buffer, app.line_num, frame.size().width - 2);
     let size = frame.size();
 
     // get scroll status
     let (mut read, line) = app.scroll_status;
-    if let Some(current_read) = app.records.get_index(read) {
-        let mut current_height = current_read.calculate_height(size.width) - line;
-        // we subtract a further 1 to avoid cases where there will be a gap
-        if current_height != 0 {
-            current_height -= 1;
-        }
 
-        // first, let's render the topmost read
-        frame.render_widget(
-            current_read
-                .paragraph
-                .clone()
-                .scroll((line.try_into().unwrap(), 0)),
-            frame.size(),
-        );
+    let mut current_height = 0;
 
-        // TODO: implement this as a ReadBufferIterator
-        read += 1;
-        loop {
-            if let Some(r) = app.records.get_index(read) {
-                if current_height >= size.height {
-                    break;
-                }
-
-                let old_size = size.clone();
-                let mut new_size = old_size.clone();
-                new_size.y = current_height + 1;
-                new_size.height -= new_size.y;
-                frame.render_widget(r.paragraph.clone().scroll((0, 0)), new_size);
-
-                let height = r.clone().calculate_height(size.width.into());
-                current_height += height;
-
-                read += 1;
-            } else {
-                break;
-            }
-        }
-    }
+    frame.render_widget(
+    Paragraph::new(
+        app.records.iter_from(read).take_while(|r| {
+        current_height += r.calculate_height(size.width);
+        current_height <= size.height
+    }).map(|r| r.clone().lines.expect("Lines not highlighted yet!")).flatten().collect::<Vec<Line>>())
+            .block(Block::default().borders(Borders::ALL).title("SeqSizzle"))
+            .wrap(Wrap { trim: false })
+            .scroll((line, 0)),
+    size);
 
     if let UIMode::SearchPanel(_) = app.mode {
         let center_area = centered_rect(80, 80, frame.size());
         frame.render_widget(Clear, center_area);
-        //frame.render_widget(Block::default().title("Test popup").borders(Borders::all()), center_area);
         frame.render_stateful_widget(&app.search_panel, center_area, &mut app.mode);
     }
 }

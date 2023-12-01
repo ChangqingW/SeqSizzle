@@ -26,6 +26,7 @@ fn main() -> Result<()> {
     let events = EventHandler::new(250);
     let mut tui = Tui::new(terminal, events);
     tui.enter()?;
+    app.update(true);
     tui.draw(&mut app)?;
 
     // Start the main loop.
@@ -41,6 +42,7 @@ fn main() -> Result<()> {
             }
             Update::ScrollViewer(num) => {
                 app.scroll(num, tui.size());
+                app.update(false);
             }
             Update::Quit => {
                 app.quit = true;
