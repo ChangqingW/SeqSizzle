@@ -6,6 +6,11 @@ use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+// WIP: refactor
+// use a VecDeque to buffer records
+// store index offset of the vecdeque
+// implement get_index(n) to get record at line n
+
 /// Parse a fastq record from a BufReader
 ///
 /// Assumes the file pointer is at the start of a record
@@ -94,6 +99,7 @@ fn try_next<R: Read + Seek>(
 
 /// Parse a fastq record from a BufReader
 /// and return the record and the file position
+/// return None if EOF is reached
 fn next<R: Read + Seek>(
     buf_reader: &mut BufReader<R>,
 ) -> Result<Option<BufferedRecord>, std::io::Error> {
@@ -147,6 +153,21 @@ fn read_to_pos<R: Read + Seek>(
     Ok(buff)
 }
 
+fn skip_n_records<R: Read>(buf_reader: &mut BufReader<R>, n: usize) -> Result<(), std::io::Error> {
+    for _ in 0..(n * 4) {
+        match buf_reader.read_line(&mut String::new()) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("skip_n_records EOF reached after {} lines", n),
+                ));
+            }
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
 
 #[cfg(not(debug_assertions))]
 static RECORD_BUF_SIZE: usize = 1024 * 1024; // 1MB
@@ -154,7 +175,7 @@ static RECORD_BUF_SIZE: usize = 1024 * 1024; // 1MB
 static READER_BUF_SIZE: usize = 2000;
 
 #[cfg(debug_assertions)]
-static RECORD_BUF_SIZE: usize = 20;
+static RECORD_BUF_SIZE: usize = 4;
 #[cfg(debug_assertions)]
 static READER_BUF_SIZE: usize = RECORD_BUF_SIZE * 4 * 300;
 
@@ -171,125 +192,122 @@ struct BufferedRecord {
 #[derive(Debug)]
 pub struct BidirectionalFastqReader<R: Read + Seek> {
     buf_reader: BufReader<R>,
-    backwards_records_buffer: VecDeque<BufferedRecord>,
+    records_buffer: VecDeque<fastq::Record>,
+    offset: usize, // offset of the first record in the buffer
+    pub total_records: Option<usize>,
 }
 
 // Constructor for File
 impl BidirectionalFastqReader<File> {
     pub fn from_path(path: &Path) -> Self {
-        Self {
-            buf_reader: BufReader::with_capacity(
-                READER_BUF_SIZE,
-                match File::open(path) {
-                    Ok(file) => file,
-                    Err(e) => panic!("Error opening file '{}': {:?}", path.to_string_lossy(), e),
-                },
-            ),
-            backwards_records_buffer: VecDeque::with_capacity(RECORD_BUF_SIZE + 1),
-        }
+        Self::new(match File::open(path) {
+            Ok(file) => file,
+            Err(e) => panic!("Error opening file '{}': {:?}", path.to_string_lossy(), e),
+        })
     }
 }
 
 // Generic methods
 impl<R: Read + Seek> BidirectionalFastqReader<R> {
-    pub fn new(reader: R) -> Self {
-        Self {
+    pub fn new(mut reader: R) -> Self {
+        assert!(
+            reader.stream_position().unwrap() == 0,
+            "reader not at the start of the file"
+        );
+        let mut ret = Self {
             buf_reader: BufReader::with_capacity(READER_BUF_SIZE, reader),
-            backwards_records_buffer: VecDeque::with_capacity(RECORD_BUF_SIZE + 1),
-        }
+            records_buffer: VecDeque::with_capacity(RECORD_BUF_SIZE + 1),
+            offset: 0,    
+            total_records: None,
+        };
+        ret.fill_buffer().unwrap();
+        ret
     }
 
-    pub fn next(&mut self) -> Result<Option<fastq::Record>, std::io::Error> {
-        let res: Option<BufferedRecord> = next(&mut self.buf_reader)?;
-        if res.is_none() {
-            Ok(None)
-        } else {
-            self.backwards_records_buffer
-                .push_back(res.clone().unwrap());
-            if self.backwards_records_buffer.len() > RECORD_BUF_SIZE {
-                self.backwards_records_buffer.pop_front();
-            }
-            Ok(Some(res.unwrap().record))
-        }
-    }
-
-    /// returns the previous record and moves the file pointer to the start of
-    /// the returned record
-    pub fn prev(&mut self) -> Result<Option<fastq::Record>, std::io::Error> {
-        if self.buf_reader.stream_position()? == 0 {
-            return Ok(None);
-        }
-        let poped = self.backwards_records_buffer.pop_back();
-        match poped {
-            Some(record) => {
-                self.buf_reader
-                    .seek(std::io::SeekFrom::Start(record.file_position))?;
-                Ok(Some(record.record))
-            }
-            None => {
-                // Seek backwards READER_BUF_SIZE bytes, or to the start of the file
-                // usize(u32/u64) to u64
-                let current_pos = self.buf_reader.stream_position()?;
-                let seek = if current_pos > READER_BUF_SIZE as u64 {
-                    std::io::SeekFrom::Current(-(READER_BUF_SIZE as i64))
-                } else {
-                    std::io::SeekFrom::Start(0)
-                };
-                self.buf_reader.seek(seek)?;
-                self.backwards_records_buffer = read_to_pos(&mut self.buf_reader, current_pos)?;
-                match self.backwards_records_buffer.pop_back() {
-                    Some(record) => {
-                        self.buf_reader
-                            .seek(std::io::SeekFrom::Start(record.file_position))?;
-                        Ok(Some(record.record))
-                    }
-                    None => {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "prev() could not find a valid record before current position",
-                        ))
-                    }
+    pub fn fill_buffer(&mut self) -> Result<(), std::io::Error> {
+        for _ in 0..RECORD_BUF_SIZE {
+            match next(&mut self.buf_reader)? {
+                Some(res) => {
+                    self.records_buffer.push_back(res.record);
+                }
+                None => {
+                    self.total_records = Some(self.offset + self.records_buffer.len());
+                    break;
                 }
             }
         }
-    }
-
-    pub fn next_n(&mut self, n: usize) -> Result<Vec<fastq::Record>, std::io::Error> {
-        let mut records: Vec<fastq::Record> = Vec::with_capacity(n);
-        for _ in 0..n {
-            match self.next()? {
-                Some(record) => records.push(record),
-                None => break,
-            }
-        }
-        Ok(records)
-    }
-
-    pub fn prev_n(&mut self, n: usize) -> Result<Vec<fastq::Record>, std::io::Error> {
-        if n > RECORD_BUF_SIZE {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "prev_n() can only return up to {} records, got {}",
-                    RECORD_BUF_SIZE, n
-                ),
-            ));
-        }
-        let mut records: Vec<fastq::Record> = Vec::with_capacity(n);
-        for _ in 0..n {
-            match self.prev()? {
-                Some(record) => records.push(record),
-                None => break,
-            }
-        }
-        records.reverse();
-        Ok(records)
-    }
-
-    pub fn rewind_to_start(&mut self) -> Result<(), std::io::Error> {
-        self.buf_reader.seek(std::io::SeekFrom::Start(0))?;
-        self.backwards_records_buffer.clear();
         Ok(())
+    }
+
+    fn pop_front(&mut self) {
+        if self.records_buffer.pop_front().is_some() {
+            self.offset += 1;
+        } else {
+            panic!("pop_front called on empty buffer");
+        }
+    }
+
+    fn rewind(&mut self) -> Result<(), std::io::Error> {
+        if self.offset != 0 {
+            self.records_buffer.clear();
+            self.buf_reader.rewind()?;
+            self.offset = 0;
+            self.fill_buffer()?;
+            Ok(())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// returns the record at the given index
+    /// if the index is after the current buffer, forward the buffer to RECORD_BUF_SIZE/4
+    /// records after the index
+    /// if the index is before the current buffer, rewind the buffer to RECORD_BUF_SIZE/4
+    /// records before the index
+    pub fn get_index(&mut self, index: usize) -> Result<Option<fastq::Record>, std::io::Error> {
+        if self.total_records.is_some() && index > self.total_records.unwrap() {
+            return Ok(None);
+        }
+        if index >= self.offset && index < self.offset + self.records_buffer.len() {
+            return Ok(Some(self.records_buffer[index - self.offset].clone()));
+        } else if index >= self.offset + self.records_buffer.len() {
+            // forward the buffer
+            for _ in 0..(index - self.offset - self.records_buffer.len() + RECORD_BUF_SIZE / 4)
+            {
+                match next(&mut self.buf_reader)? {
+                    Some(res) => {
+                        self.records_buffer.push_back(res.record);
+                        if self.records_buffer.len() > RECORD_BUF_SIZE {
+                            self.pop_front();
+                        }
+                    }
+                    None => {
+                        self.total_records = Some(self.offset + self.records_buffer.len());
+                        if index >= self.offset + self.records_buffer.len() {
+                            return Ok(None);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            return Ok(Some(self.records_buffer[index - self.offset].clone()));
+        } else if index < self.offset {
+            // rewind the buffer
+            if index < RECORD_BUF_SIZE {
+                self.rewind()?;
+                return Ok(Some(self.records_buffer[index].clone()));
+            } else {
+                self.records_buffer.clear();
+                self.buf_reader.rewind()?;
+                skip_n_records(&mut self.buf_reader, index - RECORD_BUF_SIZE / 4)?;
+                self.offset = index - RECORD_BUF_SIZE / 4;
+                self.fill_buffer()?;
+                return Ok(Some(self.records_buffer[RECORD_BUF_SIZE / 4].clone()));
+            }
+        } else {
+            panic!("unexpected case in get_index");
+        }
     }
 }
 
@@ -334,31 +352,12 @@ fn cleanup_test(file_name: PathBuf) {
 }
 
 #[test]
-fn test_parse_record() {
+fn test_get_index() {
     let (file_name, mut reader, records) = setup_test();
-    for i in 0..10 {
-        assert_eq!(reader.next().unwrap().unwrap(), records[i]);
-    }
-    assert_eq!(reader.next().unwrap(), None);
-    cleanup_test(file_name);
-}
-
-#[test]
-fn test_prev_n_1() {
-    let (file_name, mut reader, records) = setup_test();
-    assert_eq!(reader.next_n(20).unwrap(), records);
-    assert_eq!(reader.prev_n(4).unwrap(), records[6..]);
-    assert_eq!(reader.prev_n(4).unwrap(), records[2..6]);
-    assert_eq!(reader.prev_n(4).unwrap(), records[..2]);
-    assert_eq!(reader.next_n(2).unwrap(), records[..2]);
-    cleanup_test(file_name);
-}
-
-#[test]
-fn test_prev_n_2() {
-    let (file_name, mut reader, records) = setup_test();
-    assert_eq!(reader.next_n(3).unwrap(), records[..3]);
-    assert_eq!(reader.prev_n(2).unwrap(), records[1..3]);
-    assert_eq!(reader.prev_n(2).unwrap(), records[0..1]);
+    assert_eq!(reader.get_index(0).unwrap().unwrap(), records[0]);
+    assert_eq!(reader.get_index(9).unwrap().unwrap(), records[9]);
+    assert_eq!(reader.get_index(4).unwrap().unwrap(), records[4]);
+    assert_eq!(reader.get_index(8).unwrap().unwrap(), records[8]);
+    assert_eq!(reader.get_index(5).unwrap().unwrap(), records[5]);
     cleanup_test(file_name);
 }
