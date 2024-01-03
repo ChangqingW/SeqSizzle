@@ -29,3 +29,6 @@ Use **Shift +** arrow keys to move cursor within an input field (as arrow keys a
 ## Misc
  * Unit tests  
  * Handle illegal seek panic for not seekable files (e.g. shell substitution)
+
+# WIP
+~~Work out how to refactor `app.search_pattern` and `Read.lines` to reflow lines on rendering~~ just reflow all lines in buffer.

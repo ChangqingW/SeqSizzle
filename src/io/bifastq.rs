@@ -148,14 +148,14 @@ fn read_to_pos<R: Read + Seek>(
 }
 
 #[cfg(not(debug_assertions))]
-static RECORD_BUF_SIZE: usize = 1024 * 1024; // 1MB
+const RECORD_BUF_SIZE: usize = 1024 * 1024; // 1MB
 #[cfg(not(debug_assertions))]
-static READER_BUF_SIZE: usize = 2000;
+const READER_BUF_SIZE: usize = 2000;
 
 #[cfg(debug_assertions)]
-static RECORD_BUF_SIZE: usize = 20;
+const RECORD_BUF_SIZE: usize = 24;
 #[cfg(debug_assertions)]
-static READER_BUF_SIZE: usize = RECORD_BUF_SIZE * 4 * 300;
+const READER_BUF_SIZE: usize = RECORD_BUF_SIZE * 4 * 300;
 
 #[derive(Debug, Clone)]
 struct BufferedRecord {

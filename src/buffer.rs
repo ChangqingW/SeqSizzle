@@ -1,4 +1,5 @@
 use crate::io::bifastq::BidirectionalFastqReader;
+use crate::app::SearchPattern;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, Write};
@@ -10,32 +11,34 @@ use ratatui::{
     widgets::{Paragraph, Wrap},
 };
 
+#[cfg(debug_assertions)]
 const RECORDS_BUF_SIZE: usize = 4; // Need to be a multiple of 4
-const MAX_BUFFER_READ_COUNT: usize = 20;
-const BUFFER_AMOUNT: usize = 5;
 
-// Buffer manages buffered paragraphs,
-// which prevents requiring multiple reflow calls.
+#[cfg(not(debug_assertions))]
+const RECORDS_BUF_SIZE: usize = 12; 
+
 #[derive(Debug, Clone)]
 pub struct Read<'a> {
     pub read: fastq::Record,
-    pub lines: Option<Vec<Line<'a>>>    // highlighted lines
+    // highlighted lines
+    // Lines cannot be optinally rendered, because rendering require
+    // reference to search patterns, which are mutable
+    // hence all lines are highlighted and re-hlighlighed on every
+    // search pattern update
+    pub lines: Vec<Line<'a>>
 }
 
 impl<'a> Read<'a> {
     pub fn new(read: fastq::Record) -> Self {
         Self {
             read,
-            lines: None,
+            lines: vec![Line::from("Line unrendered!")],
         }
     }
 
     pub fn calculate_height(&self, width: u16) -> u16 {
         assert_ne!(width, 0);
-
         self.lines
-            .as_ref()
-            .expect("No updates performed on read yet!")
             .iter()
             .map(|line| u16::try_from(line.width().div_ceil(width as usize)).unwrap())
             .sum()
@@ -118,15 +121,9 @@ impl<'a> ReadBuffer<'a> {
             }
         }
 
-        // assert!(
-        //     vec_idx >= 0,
-        //     "Vector scaled index should always be positive"
-        // );
-
-        let read_cnt = self.reads.len();
-        if vec_idx <= BUFFER_AMOUNT as i16 && index > BUFFER_AMOUNT {
+        if vec_idx < 0 {
             self.buffer_backward();
-        } else if vec_idx >= self.reads.len() as i16 - BUFFER_AMOUNT as i16 {
+        } else if vec_idx as usize >= self.reads.len() {
             self.buffer_forward();
         } else {
             return;
@@ -147,7 +144,7 @@ impl<'a> ReadBuffer<'a> {
 
         // we both add new reads to one end, and remove reads from the other end
         for record in new_records {
-            if self.reads.len() >= MAX_BUFFER_READ_COUNT {
+            if self.reads.len() >= RECORDS_BUF_SIZE {
                 // we increment the offset by one, as the new front of queue is
                 // has one higher actual index
                 self.offset += 1;
@@ -170,7 +167,7 @@ impl<'a> ReadBuffer<'a> {
         // rewind reader head?
 
         for record in new_records {
-            if self.reads.len() >= MAX_BUFFER_READ_COUNT {
+            if self.reads.len() >= RECORDS_BUF_SIZE {
                 self.reads.pop_back();
             }
             self.reads.push_front(Read::new(record));

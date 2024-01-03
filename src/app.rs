@@ -145,11 +145,10 @@ impl App<'_> {
             SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3),
             SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Blue, 0),
             SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Green, 0),
-            SearchPattern::new("TCTTCTTTC".to_string(), Color::Red, 0),
         ];
         let mut instance = App {
             quit: false,
-            search_patterns: default_search_patterns.clone(),
+            search_patterns: default_search_patterns,
             records: ReadBuffer::new(file),
             mode: UIMode::Viewer(SearchPanelState {
                 focus: SearchPanelFocus::PatternsList,
