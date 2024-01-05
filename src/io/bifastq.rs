@@ -247,7 +247,7 @@ impl<R: Read + Seek> BidirectionalFastqReader<R> {
         }
     }
 
-    fn rewind(&mut self) -> Result<(), std::io::Error> {
+    pub fn rewind(&mut self) -> Result<(), std::io::Error> {
         if self.offset != 0 {
             self.records_buffer.clear();
             self.buf_reader.rewind()?;

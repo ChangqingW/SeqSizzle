@@ -4,12 +4,12 @@ use ratatui::{
 };
 use crate::app::{App, UIMode, SearchPanel};
 
-pub fn render(view_buffer: Vec<Line>, app: &mut App, frame: &mut Frame) {
+pub fn render(app: &mut App, frame: &mut Frame) {
     frame.render_widget(
-        Paragraph::new(view_buffer)
+        Paragraph::new(app.rendered_lines.clone().into_iter().collect::<Vec<Line>>())
             .block(Block::default().borders(Borders::ALL).title(app.file.to_str().unwrap_or("SeqSizzle")))
             .wrap(Wrap { trim: false })
-            .scroll((app.scroll_num, 0)),
+            .scroll((app.scroll_status.1 as u16, 0)),
         frame.size(),
     );
     if let UIMode::SearchPanel(_) = app.mode {

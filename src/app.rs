@@ -11,26 +11,26 @@ use rayon::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tui_textarea::{CursorMove, TextArea};
+use std::collections::VecDeque;
 
 #[cfg(debug_assertions)]
-const RECORDS_BUF_SIZE: usize = 24; // Need to be a multiple of 4
+const RENDER_BUF_SIZE: usize = 24; 
 #[cfg(not(debug_assertions))]
-const RECORDS_BUF_SIZE: usize = 100; // Need to be a multiple of 4
+const RENDER_BUF_SIZE: usize = 100;
 
 #[derive(Debug)]
 pub struct App<'a> {
-    pub quit: bool,
-    pub search_patterns: Vec<SearchPattern>,
-    pub records_buf: Vec<fastq::Record>,
-    pub line_buf: Vec<Line<'a>>,
     pub mode: UIMode,
-    pub line_num: usize, // x2 of records_buf (id + seq)
-    pub scroll_num: u16, // Ratatui paragraph scroll by wrapped line num
+    pub quit: bool,
     pub search_panel: SearchPanel<'a>,
+    pub search_patterns: Vec<SearchPattern>,
     pub file: PathBuf,
+    pub rendered_lines: VecDeque<Line<'a>>,
+    // offset of the rendered lines to the file
+    // scroll within the viewed lines -- reset to 0 on resize
+    pub scroll_status: (usize, usize),
     reader: BidirectionalFastqReader<File>,
     active_boarder_style: Style,
-    buf_bounded: (bool, bool), // buffer reached start / end of file
 }
 
 #[derive(Debug, Clone)]
@@ -154,25 +154,17 @@ impl App<'_> {
         let mut instance = App {
             quit: false,
             search_patterns: default_search_patterns.clone(),
-            records_buf: reader
-                .next_n(RECORDS_BUF_SIZE)
-                .expect("Failed to parse record"),
-            line_buf: Vec::new(),
             mode: UIMode::Viewer(SearchPanelState {
                 focus: SearchPanelFocus::PatternsList,
                 patterns_list_selection: Some(0),
             }),
-            line_num: 0,
-            scroll_num: 0,
             search_panel: SearchPanel::new(&default_search_patterns),
             file: Path::new(&file).to_path_buf(),
             reader,
             active_boarder_style: Style::new().red().bold(),
-            buf_bounded: (true, false),
+            rendered_lines: VecDeque::with_capacity(2*(RENDER_BUF_SIZE + 1)),
+            scroll_status: (0, 0)
         };
-        if instance.records_buf.len() < RECORDS_BUF_SIZE {
-            instance.buf_bounded.1 = true;
-        }
         instance.highligh_search_panel_focus(SearchPanelFocus::PatternsList);
         instance.update();
         instance
@@ -268,102 +260,84 @@ impl App<'_> {
         };
     }
 
-    fn scrollable_lines(&self, tui_size: Rect) -> usize {
-        let mut lines = 0;
-        for i in (self.line_num..self.line_buf.len()).rev() {
-            lines += (self.line_buf[i].width() as u16 + tui_size.width - 1) / tui_size.width;
-            if lines + 1 >= tui_size.height {
-                return i - self.line_num + 1;
-            }
-        }
-        0
-    }
-
-    fn buffer_forward(&mut self) {
-        // Grab 25% more records
-        let new_records = self.reader.next_n(RECORDS_BUF_SIZE / 4).unwrap();
-        let len = new_records.len();
-        if len < RECORDS_BUF_SIZE / 4 {
-            self.buf_bounded.1 = true;
-        }
-
-        // append to buffer and resize to RECORDS_BUF_SIZE again
-        self.records_buf.append(&mut new_records.clone());
-        self.records_buf =
-            self.records_buf[self.records_buf.len().saturating_sub(RECORDS_BUF_SIZE)..].to_vec();
-
-        self.line_buf.append(&mut Self::record_to_lines(
-            &new_records,
-            &self.search_patterns,
-        ));
-        self.line_buf =
-            self.line_buf[self.line_buf.len().saturating_sub(RECORDS_BUF_SIZE)..].to_vec();
-
-        self.line_num = self.line_num.saturating_sub(len * 2); // id + seq
-        if self.buf_bounded.0 && len > 0 {
-            self.buf_bounded.0 = false;
-        }
-    }
-
-    // TODO: buffer_backward only need partial update on line_buf
-    // not worth the effort?
-    fn buffer_backward(&mut self) {
-        let mut new_records = self
-            .reader
-            .prev_n(self.records_buf.len() + (RECORDS_BUF_SIZE / 4))
-            .unwrap();
-        let len = new_records.len();
-        //self.reader.rewind_n(len - RECORDS_BUF_SIZE).unwrap();
-        // TODO: fix line number error in scrolling
-        _ = self.reader.next_n(self.records_buf.len());
-        if len < self.records_buf.len() + (RECORDS_BUF_SIZE / 4) {
-            self.buf_bounded.0 = true;
-        }
-        new_records.append(&mut self.records_buf);
-        self.records_buf = new_records[..RECORDS_BUF_SIZE.min(new_records.len())].to_vec();
-        self.line_num += (len - RECORDS_BUF_SIZE) * 2;
-        self.update();
-    }
-
-    // TODO: fix buffer forward causing scrolling more than num
     pub fn scroll(&mut self, num: isize, tui_rect: Rect) {
-        if num <= isize::MIN + 1 {
+        /// scroll the rendered lines by num
+        /// rendered_lines append / pop lines if scrolling beyond a read
+
+        /// line height in tui
+        fn line_height(line: &Line, tui_rect: Rect) -> usize {
+            return line.width().div_ceil(tui_rect.width as usize - 2); // 2 boarders 1 char wide
+        }
+        fn lines_height(lines: &[Line], tui_rect: Rect) -> usize {
+            return lines.iter().map(|x| line_height(x, tui_rect)).sum();
+        }
+
+        if num == 0 {
+            return;
+        } else if num <= isize::MIN + 1 {
             self.back_to_top();
             return;
-        }
-        let scrollable_lines = self.scrollable_lines(tui_rect);
-        if num < 0 && (num.abs() as usize > self.line_num) {
-            match self.buf_bounded.0 {
-                true => self.line_num = 0,
-                false => {
-                    self.buffer_backward();
-                    self.scroll(num, tui_rect);
-                    return;
+        } else if num < 0 {
+            if self.scroll_status.1 > 0 { // scroll within the first line 
+                let remaining = self.scroll_status.1 as isize + num;
+                self.scroll_status.1 = remaining.max(0) as usize;
+                return self.scroll(remaining.min(0), tui_rect);
+            } else {
+                let mut remaining = num;
+                while remaining < 0 && self.scroll_status.0 > 0 {
+                    let lines = Self::record_to_lines(
+                        &self.reader.get_index(self.scroll_status.0 - 1)
+                        .unwrap().expect("Failed to fetch previous record while scroll_status.0 > 1"),
+                        &self.search_patterns);
+                    remaining += lines_height(&lines[0..2], tui_rect) as isize;
+                    lines.into_iter().rev().for_each(|x| self.rendered_lines.push_front(x));
+                    self.scroll_status.0 -= 1;
+                    if self.rendered_lines.len() > RENDER_BUF_SIZE * 2 {
+                        self.rendered_lines.pop_back();
+                        self.rendered_lines.pop_back();
+                    }
                 }
+                self.scroll_status.1 = remaining.max(0) as usize;
+                return;
             }
-        } else if num >= scrollable_lines as isize {
-            match self.buf_bounded.1 {
-                true => self.line_num += scrollable_lines,
-                false => {
-                    self.buffer_forward();
-                    self.scroll(num, tui_rect);
-                    return;
-                }
-            }
-        } else {
-            self.line_num = (self.line_num as isize + num) as usize;
-        }
+        } else if num > 0 {
+            let mut remaining: isize = num + self.scroll_status.1 as isize; // remaining lines to scroll
+            // TODO: refactor rendered_lines to be VecDeque<RenderedRecord> to avoid make_contiguous
+            let mut current_line_height = lines_height(&self.rendered_lines.make_contiguous()[..2], tui_rect);
+            self.scroll_status.1 = 0;
 
-        self.scroll_num =
-            Self::line_num_to_scroll(&self.line_buf, self.line_num, tui_rect.width - 2);
+            while remaining >= current_line_height as isize {
+                let rec = self.reader.get_index(self.scroll_status.0 + RENDER_BUF_SIZE).unwrap();
+                if rec.is_none() { // EOF reached, scroll the rendered lines within their total height
+                    self.scroll_status.1 = (self.scroll_status.1 + remaining as usize).min(
+                        self.rendered_lines
+                        .iter()
+                        .map(|x| line_height(&x, tui_rect))
+                        .sum::<usize>()
+                        .saturating_sub(tui_rect.height as usize)
+                        + 3); // 2 x boarders 1 char high, plus 1 empty line to indicate EOF
+                    return;
+                }
+                // otherwise append new line and pop current line
+                self.rendered_lines.pop_front().expect("Failed to pop front line id");
+                self.rendered_lines.pop_front().expect("Failed to pop front line seq");
+                self.scroll_status.0 += 1;
+                Self::record_to_lines(&rec.unwrap(), &self.search_patterns)
+                    .into_iter()
+                    .for_each(|x| self.rendered_lines.push_back(x));
+                remaining -= current_line_height as isize;
+                current_line_height = lines_height(&self.rendered_lines.make_contiguous()[..2], tui_rect);
+            }
+            self.scroll_status.1 = remaining as usize;
+            return;
+        }
+        panic!("Unreachable line in scroll");
     }
 
+
     pub fn back_to_top(&mut self) {
-        self.reader.rewind_to_start().unwrap();
-        self.records_buf = self.reader.next_n(RECORDS_BUF_SIZE).unwrap();
-        self.line_num = 0;
-        self.scroll_num = 0;
-        self.buf_bounded = (true, self.records_buf.len() < RECORDS_BUF_SIZE);
+        self.reader.rewind().unwrap();
+        self.scroll_status = (0, 0);
         self.update();
     }
 
@@ -479,43 +453,49 @@ impl App<'_> {
     }
 
     pub fn resized_update(&mut self, tui_rect: Rect) {
-        // handle resize event
-        self.scroll_num =
-            Self::line_num_to_scroll(&self.line_buf, self.line_num, tui_rect.width - 2);
+        // TODO
+        self.scroll_status.1 = 0;
     }
 
-    fn line_num_to_scroll(text: &[Line], line_num: usize, row_len: u16) -> u16 {
-        text[..line_num]
-            .par_iter()
-            .map(|x| (x.width() as u16 + row_len - 1) / row_len) // ceiling division
-            .sum()
-    }
-
+    /// full update
+    /// get lines from reader and render
     pub fn update(&mut self) {
-        // update all records in buffer
-        self.line_buf = Self::record_to_lines(&self.records_buf, &self.search_patterns);
+        // TODO: handle EOF
+        let records = (self.scroll_status.0 .. self.scroll_status.0 + RENDER_BUF_SIZE)
+            .filter_map(|i| {
+                self.reader.get_index(i).expect("Failed to get index")
+            })
+            .collect::<Vec<fastq::Record>>();
+        assert!(records.len() == RENDER_BUF_SIZE, "Failed to get enough records, EOF reached?");
+        // TODO: return VecDeque directly in records_to_lines
+        self.rendered_lines = Self::records_to_lines(&records, &self.search_patterns).into();
     }
 
-    fn record_to_lines<'a>(
+    fn records_to_lines<'a>(
         records: &[fastq::Record],
         search_patterns: &[SearchPattern],
     ) -> Vec<Line<'a>> {
         // parallel by record
         records
             .par_iter()
-            .map(|record| {
-                let seq = String::from_utf8_lossy(record.seq()).to_string();
-                let matches: Vec<(IntervalSet<usize>, Color)> = search_patterns
-                    .iter()
-                    .map(|x| (Self::search(record, x), x.color))
-                    .collect::<Vec<(IntervalSet<usize>, Color)>>();
-                (
-                    record.id().to_string().into(),
-                    highlight_matches(&matches, seq, Color::Gray),
-                )
-            })
-            .flat_map(|(id, seq)| vec![id, seq])
+            .map(|record| Self::record_to_lines(record, search_patterns))
+            .flatten()
             .collect()
+    }
+
+    fn record_to_lines<'a>(
+        record: &fastq::Record,
+        search_patterns: &[SearchPattern],
+    ) -> Vec<Line<'a>> {
+        let seq = String::from_utf8_lossy(record.seq()).to_string();
+        let matches: Vec<(IntervalSet<usize>, Color)> = search_patterns
+            .iter()
+            .map(|x| (Self::search(record, x), x.color))
+            .collect::<Vec<(IntervalSet<usize>, Color)>>();
+        vec![
+            record.id().to_string().into(),
+            highlight_matches(&matches, seq, Color::Gray),
+        ]
     }
 
     fn search(record: &fastq::Record, pattern: &SearchPattern) -> IntervalSet<usize> {
