@@ -1,4 +1,4 @@
-use crate::io::bifastq::BidirectionalFastqReader;
+use crate::io::fastq::FastqReader;
 use crate::read_stylizing::highlight_matches;
 
 use bio::io::fastq;
@@ -29,7 +29,7 @@ pub struct App<'a> {
     // offset of the rendered lines to the file
     // scroll within the viewed lines -- reset to 0 on resize
     pub scroll_status: (usize, usize),
-    reader: BidirectionalFastqReader<File>,
+    reader: FastqReader<File>,
     active_boarder_style: Style,
 }
 
@@ -143,7 +143,7 @@ pub struct SearchPanelState {
 
 impl App<'_> {
     pub fn new(file: String) -> Self {
-        let mut reader = BidirectionalFastqReader::from_path(&Path::new(&file));
+        let mut reader = FastqReader::from_path(&Path::new(&file));
         let default_search_patterns = vec![
             SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3),
             SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3),

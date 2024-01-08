@@ -181,7 +181,7 @@ fn test_buf_size() {
 }
 
 #[derive(Debug)]
-pub struct BidirectionalFastqReader<R: Read + Seek> {
+pub struct FastqReader<R: Read + Seek> {
     buf_reader: BufReader<R>,
     records_buffer: VecDeque<fastq::Record>,
     offset: usize, // offset of the first record in the buffer
@@ -189,7 +189,7 @@ pub struct BidirectionalFastqReader<R: Read + Seek> {
 }
 
 // Constructor for File
-impl BidirectionalFastqReader<File> {
+impl FastqReader<File> {
     pub fn from_path(path: &Path) -> Self {
         Self::new(match File::open(path) {
             Ok(mut file) => {
@@ -203,7 +203,7 @@ impl BidirectionalFastqReader<File> {
 }
 
 // Generic methods
-impl<R: Read + Seek> BidirectionalFastqReader<R> {
+impl<R: Read + Seek> FastqReader<R> {
     pub fn new(mut reader: R) -> Self {
         assert!(
             reader.stream_position().unwrap() == 0,
@@ -307,7 +307,7 @@ impl<R: Read + Seek> BidirectionalFastqReader<R> {
 }
 
 #[allow(dead_code)]
-fn setup_test() -> (PathBuf, BidirectionalFastqReader<File>, Vec<fastq::Record>) {
+fn setup_test() -> (PathBuf, FastqReader<File>, Vec<fastq::Record>) {
     let mut file_name = temp_dir();
     file_name.push(format!("{}.fastq", Uuid::new_v4()));
     let mut file = File::create(file_name.clone()).unwrap();
@@ -325,7 +325,7 @@ fn setup_test() -> (PathBuf, BidirectionalFastqReader<File>, Vec<fastq::Record>)
     )
     .unwrap();
     file.sync_all().unwrap();
-    let reader = BidirectionalFastqReader::new(File::open(file_name.clone()).unwrap());
+    let reader = FastqReader::new(File::open(file_name.clone()).unwrap());
     let records: Vec<fastq::Record> = fastq::Reader::new(File::open(file_name.clone()).unwrap())
         .records()
         .map(|r| r.unwrap())

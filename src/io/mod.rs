@@ -1,1 +1,1 @@
-pub mod bifastq;
+pub mod fastq;
