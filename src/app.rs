@@ -6,7 +6,7 @@ use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
 use ratatui::prelude::{Alignment, Color, Line, Modifier, Rect, Span, Style, Stylize};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use rayon::prelude::*;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -31,6 +31,7 @@ pub struct App<'a> {
     pub scroll_status: (usize, usize),
     reader: FastqReader<File>,
     active_boarder_style: Style,
+    message: TransientMessage,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +142,37 @@ pub struct SearchPanelState {
     pub patterns_list_selection: Option<usize>,
 }
 
+#[derive(Debug)]
+pub struct TransientMessage {
+    message: String,
+    timer: u8, // ticks to live
+}
+impl TransientMessage {
+    pub fn new(message: String) -> Self {
+        Self {
+            message,
+            timer: 1,
+        }
+    }
+    pub fn default() -> Self {
+        Self {
+            message: String::new(),
+            timer: 0,
+        }
+    }
+    pub fn get(&mut self) -> Option<String> {
+        if self.timer > 0 {
+            self.timer -= 1;
+            Some(self.message.clone())
+        } else {
+            None
+        }
+    }
+    pub fn dismiss(&mut self) {
+        self.timer = 0;
+    }
+}
+
 impl App<'_> {
     pub fn new(file: String) -> Self {
         let reader = FastqReader::from_path(&Path::new(&file));
@@ -154,6 +186,7 @@ impl App<'_> {
         let mut instance = App {
             quit: false,
             search_patterns: default_search_patterns.clone(),
+            message: TransientMessage::default(),
             mode: UIMode::Viewer(SearchPanelState {
                 focus: SearchPanelFocus::PatternsList,
                 patterns_list_selection: Some(0),
@@ -264,12 +297,15 @@ impl App<'_> {
         /// scroll the rendered lines by num
         /// rendered_lines append / pop lines if scrolling beyond a read
 
-        /// line height in tui
+        // line height in tui
         fn line_height(line: &Line, tui_rect: Rect) -> usize {
             return line.width().div_ceil(tui_rect.width as usize - 2); // 2 boarders 1 char wide
         }
-        fn lines_height(lines: &[Line], tui_rect: Rect) -> usize {
+        fn lines_height_vec(lines: &[Line], tui_rect: Rect) -> usize {
             return lines.iter().map(|x| line_height(x, tui_rect)).sum();
+        }
+        fn lines_height_vecdeque(lines: &VecDeque<Line>, indexes: &[usize], tui_rect: Rect) -> usize {
+            return indexes.iter().map(|x| line_height(&lines[*x], tui_rect)).sum();
         }
 
         if num == 0 {
@@ -289,7 +325,7 @@ impl App<'_> {
                         &self.reader.get_index(self.scroll_status.0 - 1)
                         .unwrap().expect("Failed to fetch previous record while scroll_status.0 > 1"),
                         &self.search_patterns);
-                    remaining += lines_height(&lines[0..2], tui_rect) as isize;
+                    remaining += lines_height_vec(&lines[0..2], tui_rect) as isize;
                     lines.into_iter().rev().for_each(|x| self.rendered_lines.push_front(x));
                     self.scroll_status.0 -= 1;
                     if self.rendered_lines.len() > RENDER_BUF_SIZE * 2 {
@@ -302,8 +338,7 @@ impl App<'_> {
             }
         } else if num > 0 {
             let mut remaining: isize = num + self.scroll_status.1 as isize; // remaining lines to scroll
-            // TODO: refactor rendered_lines to be VecDeque<RenderedRecord> to avoid make_contiguous
-            let mut current_line_height = lines_height(&self.rendered_lines.make_contiguous()[..2], tui_rect);
+            let mut current_line_height = lines_height_vecdeque(&self.rendered_lines, &vec![0, 1], tui_rect);
             self.scroll_status.1 = 0;
 
             while remaining >= current_line_height as isize {
@@ -326,7 +361,7 @@ impl App<'_> {
                     .into_iter()
                     .for_each(|x| self.rendered_lines.push_back(x));
                 remaining -= current_line_height as isize;
-                current_line_height = lines_height(&self.rendered_lines.make_contiguous()[..2], tui_rect);
+                current_line_height = lines_height_vecdeque(&self.rendered_lines, &vec![0, 1], tui_rect);
             }
             self.scroll_status.1 = remaining as usize;
             return;
@@ -444,12 +479,13 @@ impl App<'_> {
         });
     }
 
-    pub fn message(&mut self, msg: String) {
-        self.search_panel.input_button =
-            Paragraph::new("ALT-5 to add pattern\n".to_string() + &*msg)
-                .alignment(Alignment::Center)
-                .wrap(Wrap { trim: false })
-                .block(Block::default().borders(Borders::ALL));
+    pub fn set_message(&mut self, msg: String) {
+        self.message = TransientMessage::new(msg);
+        // eprint!("\x07"); // sending BEL to terminal result in delayed rendering?
+    }
+
+    pub fn get_message(&mut self) -> Option<String> {
+        self.message.get()
     }
 
     pub fn resized_update(&mut self, tui_rect: Rect) {
@@ -467,14 +503,13 @@ impl App<'_> {
             })
             .collect::<Vec<fastq::Record>>();
         assert!(records.len() == RENDER_BUF_SIZE, "Failed to get enough records, EOF reached?");
-        // TODO: return VecDeque directly in records_to_lines
-        self.rendered_lines = Self::records_to_lines(&records, &self.search_patterns).into();
+        self.rendered_lines = Self::records_to_lines(&records, &self.search_patterns);
     }
 
     fn records_to_lines<'a>(
         records: &[fastq::Record],
         search_patterns: &[SearchPattern],
-    ) -> Vec<Line<'a>> {
+    ) -> VecDeque<Line<'a>> {
         // parallel by record
         records
             .par_iter()

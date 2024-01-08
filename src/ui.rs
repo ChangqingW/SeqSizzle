@@ -1,21 +1,40 @@
+use crate::app::{App, SearchPanel, UIMode};
 use ratatui::{
-    prelude::{Constraint, Direction, Frame, Layout, Line, Rect, Buffer},
-    widgets::{Block, Borders, Clear, ListState, Paragraph, StatefulWidget, Widget, Wrap},
+    prelude::{Buffer, Color, Constraint, Direction, Frame, Layout, Line, Rect, Span, Style},
+    widgets::{
+        block::title::{Position, Title},
+        Block, Borders, Clear, ListState, Paragraph, StatefulWidget, Widget, Wrap,
+    },
 };
-use crate::app::{App, UIMode, SearchPanel};
 
 pub fn render(app: &mut App, frame: &mut Frame) {
+    let viewer_block = match app.get_message() {
+        Some(msg) => Block::default()
+                .borders(Borders::ALL)
+                .title(app.file.to_str().unwrap_or("SeqSizzle"))
+                .title(Title::from(Span::styled(msg, Style::default().fg(Color::Red)))
+                .position(Position::Bottom))
+            ,
+        None => Block::default()
+                .borders(Borders::ALL)
+                .title(app.file.to_str().unwrap_or("SeqSizzle"))
+    };
+
     frame.render_widget(
-        Paragraph::new(app.rendered_lines.clone().into_iter().collect::<Vec<Line>>())
-            .block(Block::default().borders(Borders::ALL).title(app.file.to_str().unwrap_or("SeqSizzle")))
-            .wrap(Wrap { trim: false })
-            .scroll((app.scroll_status.1 as u16, 0)),
+        Paragraph::new(
+            app.rendered_lines
+                .clone()
+                .into_iter()
+                .collect::<Vec<Line>>(),
+        )
+        .block(viewer_block)
+        .wrap(Wrap { trim: false })
+        .scroll((app.scroll_status.1 as u16, 0)),
         frame.size(),
     );
     if let UIMode::SearchPanel(_) = app.mode {
         let center_area = centered_rect(80, 80, frame.size());
         frame.render_widget(Clear, center_area);
-        //frame.render_widget(Block::default().title("Test popup").borders(Borders::all()), center_area);
         frame.render_stateful_widget(&app.search_panel, center_area, &mut app.mode);
     }
 }
@@ -40,7 +59,6 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
-
 
 impl StatefulWidget for &SearchPanel<'_> {
     type State = UIMode;

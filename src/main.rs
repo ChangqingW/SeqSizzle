@@ -71,7 +71,7 @@ fn main() -> Result<()> {
                     }
                 }
             },
-            Update::Msg(msg) => app.message(msg),
+            Update::Msg(msg) => app.set_message(msg),
             Update::CycleSearchPattern(reverse) => app.cycle_patterns_list(reverse),
         };
 
