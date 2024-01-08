@@ -257,7 +257,8 @@ impl App<'_> {
         self.search_panel.input_pattern.set_block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Search string (ALT-2)"),
+                .title("Search string (ALT-2)"), // TODO: move search panel title & boarder to
+                                                 // ui.rs?
         );
         self.search_panel.input_color.set_block(
             Block::default()
@@ -334,6 +335,9 @@ impl App<'_> {
                     }
                 }
                 self.scroll_status.1 = remaining.max(0) as usize;
+                if remaining < 0 {
+                    self.set_message("Hit top".to_string());
+                }
                 return;
             }
         } else if num > 0 {
@@ -344,13 +348,15 @@ impl App<'_> {
             while remaining >= current_line_height as isize {
                 let rec = self.reader.get_index(self.scroll_status.0 + RENDER_BUF_SIZE).unwrap();
                 if rec.is_none() { // EOF reached, scroll the rendered lines within their total height
-                    self.scroll_status.1 = (self.scroll_status.1 + remaining as usize).min(
-                        self.rendered_lines
+                    let max_scroll = 3 + self.rendered_lines // 2 x boarders 1 char high, plus 1 empty line to indicate EOF
                         .iter()
                         .map(|x| line_height(&x, tui_rect))
                         .sum::<usize>()
-                        .saturating_sub(tui_rect.height as usize)
-                        + 3); // 2 x boarders 1 char high, plus 1 empty line to indicate EOF
+                        .saturating_sub(tui_rect.height as usize); 
+                    self.scroll_status.1 = (self.scroll_status.1 + remaining as usize).min(max_scroll);
+                    if self.scroll_status.1 == max_scroll {
+                        self.set_message("Hit bottom".to_string());
+                    }
                     return;
                 }
                 // otherwise append new line and pop current line
@@ -496,13 +502,14 @@ impl App<'_> {
     /// full update
     /// get lines from reader and render
     pub fn update(&mut self) {
-        // TODO: handle EOF
         let records = (self.scroll_status.0 .. self.scroll_status.0 + RENDER_BUF_SIZE)
             .filter_map(|i| {
                 self.reader.get_index(i).expect("Failed to get index")
             })
             .collect::<Vec<fastq::Record>>();
-        assert!(records.len() == RENDER_BUF_SIZE, "Failed to get enough records, EOF reached?");
+        if records.len() < RENDER_BUF_SIZE {
+            self.set_message(format!("EOF reached during app.update, {} records rendered", records.len()));
+        }
         self.rendered_lines = Self::records_to_lines(&records, &self.search_patterns);
     }
 

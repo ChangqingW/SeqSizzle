@@ -165,9 +165,9 @@ fn skip_n_records<R: Read>(buf_reader: &mut BufReader<R>, n: usize) -> Result<()
 }
 
 #[cfg(not(debug_assertions))]
-static RECORD_BUF_SIZE: usize = 1024 * 1024; // 1MB
+static RECORD_BUF_SIZE: usize = 1024;
 #[cfg(not(debug_assertions))]
-static READER_BUF_SIZE: usize = 2000;
+static READER_BUF_SIZE: usize = RECORD_BUF_SIZE * 4 * 1024; // 4MB
 
 #[cfg(debug_assertions)]
 static RECORD_BUF_SIZE: usize = 4;
@@ -294,6 +294,7 @@ impl<R: Read + Seek> FastqReader<R> {
             } else {
                 self.records_buffer.clear();
                 self.buf_reader.rewind()?;
+                // TODO: seek backwards instead of rewinding
                 skip_n_records(&mut self.buf_reader, index - RECORD_BUF_SIZE / 4)?;
                 self.offset = index - RECORD_BUF_SIZE / 4;
                 self.fill_buffer()?;
