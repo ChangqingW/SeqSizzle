@@ -9,7 +9,6 @@ use uuid::Uuid;
 // WIP: refactor
 // use a VecDeque to buffer records
 // store index offset of the vecdeque
-// TODO: rename module, cleanup unused stuff
 
 /// Parse a fastq record from a BufReader
 ///

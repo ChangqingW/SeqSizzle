@@ -16,6 +16,10 @@ When on the patterns list field, up / down arrows cycle through patterns, `D` to
 `ALT+5` to add current inputs into the search pattern list.  
 Use **Shift +** arrow keys to move cursor within an input field (as arrow keys alone are bind to cycling input fields).  
 
+#### using `ALT` key on Mac
+You need to enable [Use Option as Meta key](https://support.apple.com/en-au/guide/terminal/trmlkbrd/mac) to send the meta modifier instead of alt code shortcuts (e.g. `¡` `™` `£` `¢` `∞` ...).  
+![Settings](./img/option_as_meta.png)
+
 # Roadmap
 ## functionality 
  * With exact match, discard surrounding fuzzy match.  

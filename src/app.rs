@@ -143,7 +143,7 @@ pub struct SearchPanelState {
 
 impl App<'_> {
     pub fn new(file: String) -> Self {
-        let mut reader = FastqReader::from_path(&Path::new(&file));
+        let reader = FastqReader::from_path(&Path::new(&file));
         let default_search_patterns = vec![
             SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3),
             SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3),
