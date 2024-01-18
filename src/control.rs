@@ -126,7 +126,7 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
                 let try_color = Color::from_str(&app.search_panel.input_color.lines().join(""));
                 let try_u8 = u8::from_str(&app.search_panel.input_distance.lines().join(""));
                 match (try_color, try_u8) {
-                                       (Ok(color), Ok(distance)) => {Update::EditSearchPattern(SearchPatternEdit::Append(SearchPattern::new(search_string, color, distance)))},
+                                       (Ok(color), Ok(distance)) => {Update::EditSearchPattern(SearchPatternEdit::Append(SearchPattern::new(search_string, color, distance, None)))},
                                        (Err(_), Ok(_)) => {Update::Msg("Color needs to be valid hex code".to_string())},
                                        (Ok(_), Err(_)) => {Update::Msg("Edit distance needs to be valid positive integer".to_string())},
                                        (Err(_), Err(_)) => {Update::Msg("Color needs to be valid hex code, edit distance needs to be valid positive integer".to_string())},

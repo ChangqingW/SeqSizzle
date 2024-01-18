@@ -39,13 +39,15 @@ pub struct SearchPattern {
     pub search_string: String,
     pub color: Color,
     pub edit_distance: u8,
+    pub comment: Option<String>,
 }
 impl SearchPattern {
-    pub fn new(search_string: String, color: Color, edit_distance: u8) -> Self {
+    pub fn new(search_string: String, color: Color, edit_distance: u8, comment: Option<&str>) -> Self {
         Self {
             search_string,
             color,
             edit_distance,
+            comment: comment.map(|x| x.to_string()),
         }
     }
 }
@@ -65,8 +67,13 @@ fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
             .iter()
             .map(|x| {
                 ListItem::new(Line::from(vec![
-                    Span::from(x.search_string.clone()),
-                    Span::from(", color: "),
+                    Span::styled(x.search_string.clone(), Style::new().fg(x.color)),
+                    Span::from(
+                        if x.comment.is_some() {
+                            format!(" ({}), ", x.comment.as_ref().unwrap())
+                        } else {
+                            String::from(", ")
+                        }),
                     Span::styled(x.color.to_string(), Style::new().fg(x.color)),
                     Span::from(format!(", edit-distance: {}", x.edit_distance)),
                 ]))
@@ -174,24 +181,17 @@ impl TransientMessage {
 }
 
 impl App<'_> {
-    pub fn new(file: String) -> Self {
-        let reader = FastqReader::from_path(&Path::new(&file));
-        let default_search_patterns = vec![
-            SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3),
-            SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3),
-            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Blue, 0),
-            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Green, 0),
-            SearchPattern::new("TCTTCTTTC".to_string(), Color::Red, 0),
-        ];
+    pub fn new(file: &Path, search_patterns: Vec<SearchPattern>) -> Self {
+        let reader = FastqReader::from_path(file);
         let mut instance = App {
             quit: false,
-            search_patterns: default_search_patterns.clone(),
+            search_patterns: search_patterns.clone(),
             message: TransientMessage::default(),
             mode: UIMode::Viewer(SearchPanelState {
                 focus: SearchPanelFocus::PatternsList,
                 patterns_list_selection: Some(0),
             }),
-            search_panel: SearchPanel::new(&default_search_patterns),
+            search_panel: SearchPanel::new(&search_patterns),
             file: Path::new(&file).to_path_buf(),
             reader,
             active_boarder_style: Style::new().red().bold(),
