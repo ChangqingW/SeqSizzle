@@ -121,17 +121,6 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
             KeyCode::Char('2') => Update::SearchPanelFocus(SearchPanelFocus::InputPattern),
             KeyCode::Char('3') => Update::SearchPanelFocus(SearchPanelFocus::InputColor),
             KeyCode::Char('4') => Update::SearchPanelFocus(SearchPanelFocus::InputDistance),
-            KeyCode::Char('5') => {
-                let search_string: String = app.search_panel.input_pattern.lines().join("");
-                let try_color = Color::from_str(&app.search_panel.input_color.lines().join(""));
-                let try_u8 = u8::from_str(&app.search_panel.input_distance.lines().join(""));
-                match (try_color, try_u8) {
-                                       (Ok(color), Ok(distance)) => {Update::EditSearchPattern(SearchPatternEdit::Append(SearchPattern::new(search_string, color, distance, None)))},
-                                       (Err(_), Ok(_)) => {Update::Msg("Color needs to be valid hex code".to_string())},
-                                       (Ok(_), Err(_)) => {Update::Msg("Edit distance needs to be valid positive integer".to_string())},
-                                       (Err(_), Err(_)) => {Update::Msg("Color needs to be valid hex code, edit distance needs to be valid positive integer".to_string())},
-                                   }
-            }
             _ => Update::None,
         }
 
@@ -150,7 +139,7 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
                 ..
             } => Update::CycleSearchPattern(keyevent.code == KeyCode::Up),
             KeyEvent {
-                code: KeyCode::Char('d') | KeyCode::Delete | KeyCode::Enter,
+                code: KeyCode::Char('d') | KeyCode::Delete | KeyCode::Enter | KeyCode::Backspace,
                 modifiers: KeyModifiers::NONE,
                 ..
             } => match state.patterns_list_selection {
@@ -162,6 +151,19 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
             },
             _ => Update::None,
         }
+    } else if state.focus != SearchPanelFocus::PatternsList
+        && keyevent.modifiers == KeyModifiers::NONE
+        && keyevent.code == KeyCode::Enter
+    {
+        let search_string: String = app.search_panel.input_pattern.lines().join("");
+        let try_color = Color::from_str(&app.search_panel.input_color.lines().join(""));
+        let try_u8 = u8::from_str(&app.search_panel.input_distance.lines().join(""));
+        match (try_color, try_u8) {
+                                       (Ok(color), Ok(distance)) => {Update::EditSearchPattern(SearchPatternEdit::Append(SearchPattern::new(search_string, color, distance, None)))},
+                                       (Err(_), Ok(_)) => {Update::Msg("Color needs to be valid hex code".to_string())},
+                                       (Ok(_), Err(_)) => {Update::Msg("Edit distance needs to be valid positive integer".to_string())},
+                                       (Err(_), Err(_)) => {Update::Msg("Color needs to be valid hex code, edit distance needs to be valid positive integer".to_string())},
+                }
 
     // pass to input boxes
     } else {

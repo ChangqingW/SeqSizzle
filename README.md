@@ -59,3 +59,9 @@ You need to enable [Use Option as Meta key](https://support.apple.com/en-au/guid
  * Make elements in the search panel clickable, try implementations discussed in [ratatui repo](https://github.com/ratatui-org/ratatui/discussions/552)  
 ## Misc
  * Unit tests  
+
+# What's new
+ * Fixed backspace cannot delete patterns in search panel
+ * Added read / save search patterns with CSV file
+ * Changed to use Enter to add new patterns instead of `ALT+5`
+ * Display error / info messages in red at the bottom

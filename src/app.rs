@@ -6,15 +6,18 @@ use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
 use ratatui::prelude::{Alignment, Color, Line, Modifier, Rect, Span, Style, Stylize};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{
+    block::title::{Position, Title},
+    Block, Borders, List, ListItem, Paragraph, Wrap,
+};
 use rayon::prelude::*;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tui_textarea::{CursorMove, TextArea};
-use std::collections::VecDeque;
 
 #[cfg(debug_assertions)]
-const RENDER_BUF_SIZE: usize = 24; 
+const RENDER_BUF_SIZE: usize = 24;
 #[cfg(not(debug_assertions))]
 const RENDER_BUF_SIZE: usize = 100;
 
@@ -42,7 +45,12 @@ pub struct SearchPattern {
     pub comment: Option<String>,
 }
 impl SearchPattern {
-    pub fn new(search_string: String, color: Color, edit_distance: u8, comment: Option<&str>) -> Self {
+    pub fn new(
+        search_string: String,
+        color: Color,
+        edit_distance: u8,
+        comment: Option<&str>,
+    ) -> Self {
         Self {
             search_string,
             color,
@@ -68,12 +76,11 @@ fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
             .map(|x| {
                 ListItem::new(Line::from(vec![
                     Span::styled(x.search_string.clone(), Style::new().fg(x.color)),
-                    Span::from(
-                        if x.comment.is_some() {
-                            format!(" ({}), ", x.comment.as_ref().unwrap())
-                        } else {
-                            String::from(", ")
-                        }),
+                    Span::from(if x.comment.is_some() {
+                        format!(" ({}), ", x.comment.as_ref().unwrap())
+                    } else {
+                        String::from(", ")
+                    }),
                     Span::styled(x.color.to_string(), Style::new().fg(x.color)),
                     Span::from(format!(", edit-distance: {}", x.edit_distance)),
                 ]))
@@ -96,10 +103,11 @@ impl SearchPanel<'_> {
             input_color: TextArea::default(),
             input_distance: TextArea::default(),
             input_button: Paragraph::new(
-                "ALT-5 to add pattern\n(Todo: make clickable button and input fields)",
+                "Enter (when not selecting the patterns list) to add pattern",
             )
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL)),
+            .block(Block::default().borders(Borders::ALL))
+            .wrap(Wrap { trim: false }),
         };
         ret.input_pattern.set_block(
             Block::default()
@@ -156,10 +164,7 @@ pub struct TransientMessage {
 }
 impl TransientMessage {
     pub fn new(message: String) -> Self {
-        Self {
-            message,
-            timer: 1,
-        }
+        Self { message, timer: 1 }
     }
     pub fn default() -> Self {
         Self {
@@ -195,8 +200,8 @@ impl App<'_> {
             file: Path::new(&file).to_path_buf(),
             reader,
             active_boarder_style: Style::new().red().bold(),
-            rendered_lines: VecDeque::with_capacity(2*(RENDER_BUF_SIZE + 1)),
-            scroll_status: (0, 0)
+            rendered_lines: VecDeque::with_capacity(2 * (RENDER_BUF_SIZE + 1)),
+            scroll_status: (0, 0),
         };
         instance.highligh_search_panel_focus(SearchPanelFocus::PatternsList);
         instance.update();
@@ -305,8 +310,15 @@ impl App<'_> {
         fn lines_height_vec(lines: &[Line], tui_rect: Rect) -> usize {
             return lines.iter().map(|x| line_height(x, tui_rect)).sum();
         }
-        fn lines_height_vecdeque(lines: &VecDeque<Line>, indexes: &[usize], tui_rect: Rect) -> usize {
-            return indexes.iter().map(|x| line_height(&lines[*x], tui_rect)).sum();
+        fn lines_height_vecdeque(
+            lines: &VecDeque<Line>,
+            indexes: &[usize],
+            tui_rect: Rect,
+        ) -> usize {
+            return indexes
+                .iter()
+                .map(|x| line_height(&lines[*x], tui_rect))
+                .sum();
         }
 
         if num == 0 {
@@ -315,7 +327,8 @@ impl App<'_> {
             self.back_to_top();
             return;
         } else if num < 0 {
-            if self.scroll_status.1 > 0 { // scroll within the first line 
+            if self.scroll_status.1 > 0 {
+                // scroll within the first line
                 let remaining = self.scroll_status.1 as isize + num;
                 self.scroll_status.1 = remaining.max(0) as usize;
                 return self.scroll(remaining.min(0), tui_rect);
@@ -323,11 +336,18 @@ impl App<'_> {
                 let mut remaining = num;
                 while remaining < 0 && self.scroll_status.0 > 0 {
                     let lines = Self::record_to_lines(
-                        &self.reader.get_index(self.scroll_status.0 - 1)
-                        .unwrap().expect("Failed to fetch previous record while scroll_status.0 > 1"),
-                        &self.search_patterns);
+                        &self
+                            .reader
+                            .get_index(self.scroll_status.0 - 1)
+                            .unwrap()
+                            .expect("Failed to fetch previous record while scroll_status.0 > 1"),
+                        &self.search_patterns,
+                    );
                     remaining += lines_height_vec(&lines[0..2], tui_rect) as isize;
-                    lines.into_iter().rev().for_each(|x| self.rendered_lines.push_front(x));
+                    lines
+                        .into_iter()
+                        .rev()
+                        .for_each(|x| self.rendered_lines.push_front(x));
                     self.scroll_status.0 -= 1;
                     if self.rendered_lines.len() > RENDER_BUF_SIZE * 2 {
                         self.rendered_lines.pop_back();
@@ -342,39 +362,50 @@ impl App<'_> {
             }
         } else if num > 0 {
             let mut remaining: isize = num + self.scroll_status.1 as isize; // remaining lines to scroll
-            let mut current_line_height = lines_height_vecdeque(&self.rendered_lines, &vec![0, 1], tui_rect);
+            let mut current_line_height =
+                lines_height_vecdeque(&self.rendered_lines, &vec![0, 1], tui_rect);
             self.scroll_status.1 = 0;
 
             while remaining >= current_line_height as isize {
-                let rec = self.reader.get_index(self.scroll_status.0 + RENDER_BUF_SIZE).unwrap();
-                if rec.is_none() { // EOF reached, scroll the rendered lines within their total height
-                    let max_scroll = 3 + self.rendered_lines // 2 x boarders 1 char high, plus 1 empty line to indicate EOF
+                let rec = self
+                    .reader
+                    .get_index(self.scroll_status.0 + RENDER_BUF_SIZE)
+                    .unwrap();
+                if rec.is_none() {
+                    // EOF reached, scroll the rendered lines within their total height
+                    let max_scroll = 3 + self
+                        .rendered_lines // 2 x boarders 1 char high, plus 1 empty line to indicate EOF
                         .iter()
                         .map(|x| line_height(&x, tui_rect))
                         .sum::<usize>()
-                        .saturating_sub(tui_rect.height as usize); 
-                    self.scroll_status.1 = (self.scroll_status.1 + remaining as usize).min(max_scroll);
+                        .saturating_sub(tui_rect.height as usize);
+                    self.scroll_status.1 =
+                        (self.scroll_status.1 + remaining as usize).min(max_scroll);
                     if self.scroll_status.1 == max_scroll {
                         self.set_message("Hit bottom".to_string());
                     }
                     return;
                 }
                 // otherwise append new line and pop current line
-                self.rendered_lines.pop_front().expect("Failed to pop front line id");
-                self.rendered_lines.pop_front().expect("Failed to pop front line seq");
+                self.rendered_lines
+                    .pop_front()
+                    .expect("Failed to pop front line id");
+                self.rendered_lines
+                    .pop_front()
+                    .expect("Failed to pop front line seq");
                 self.scroll_status.0 += 1;
                 Self::record_to_lines(&rec.unwrap(), &self.search_patterns)
                     .into_iter()
                     .for_each(|x| self.rendered_lines.push_back(x));
                 remaining -= current_line_height as isize;
-                current_line_height = lines_height_vecdeque(&self.rendered_lines, &vec![0, 1], tui_rect);
+                current_line_height =
+                    lines_height_vecdeque(&self.rendered_lines, &vec![0, 1], tui_rect);
             }
             self.scroll_status.1 = remaining as usize;
             return;
         }
         panic!("Unreachable line in scroll");
     }
-
 
     pub fn back_to_top(&mut self) {
         self.reader.rewind().unwrap();
@@ -412,7 +443,8 @@ impl App<'_> {
             SearchPanelFocus::PatternsList => {
                 self.search_panel.patterns_list = self.search_panel.patterns_list.clone().block(
                     Block::default()
-                        .title("Search patterns (ALT-[number] or left / right arrow keys to switch between boxes, up / down to select patterns, enter to edit pattern, delete to delete pattern)")
+                        .title("Search patterns (up / down to select patterns, enter to edit pattern, delete to delete)")
+                .title(Title::from("left / right arrow keys to navigate between boxes").position(Position::Bottom))
                         .borders(Borders::ALL)
                         .border_style(self.active_boarder_style),
                 )
@@ -502,13 +534,14 @@ impl App<'_> {
     /// full update
     /// get lines from reader and render
     pub fn update(&mut self) {
-        let records = (self.scroll_status.0 .. self.scroll_status.0 + RENDER_BUF_SIZE)
-            .filter_map(|i| {
-                self.reader.get_index(i).expect("Failed to get index")
-            })
+        let records = (self.scroll_status.0..self.scroll_status.0 + RENDER_BUF_SIZE)
+            .filter_map(|i| self.reader.get_index(i).expect("Failed to get index"))
             .collect::<Vec<fastq::Record>>();
         if records.len() < RENDER_BUF_SIZE {
-            self.set_message(format!("EOF reached during app.update, {} records rendered", records.len()));
+            self.set_message(format!(
+                "EOF reached during app.update, {} records rendered",
+                records.len()
+            ));
         }
         self.rendered_lines = Self::records_to_lines(&records, &self.search_patterns);
     }
