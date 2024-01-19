@@ -2,7 +2,36 @@ SeqSizzle is a pager for viewing FASTQ files with fuzzy matching, allowing diffe
 [Downloat latest nightly builds for mac / Linux / Windows](https://nightly.link/ChangqingW/SeqSizzle/workflows/rust/master/Binary.zip)  
 
 # Usage
-`./SeqSizzle path_to_fastq_file.fastq`  
+`./SeqSizzle -h`:
+```
+Usage: SeqSizzle [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  The FASTQ file to view
+
+Options:
+      --adapter-3p
+          Start with 10x 3' kit adaptors:
+           - Patrial Read1: CTACACGACGCTCTTCCGATCT (and reverse complement)
+           - Partial TSO: AGATCGGAAGAGCGTCGTGTAG (and reverse complement)
+           - Poly(>10)A/T
+      --adapter-5p
+          Start with 10x 5' kit adaptors
+           - Patrial Read1: CTACACGACGCTCTTCCGATCT (and reverse complement)
+           - TSO: TTTCTTATATGGG (and reverse complement)
+           - Patrial Read2: AGATCGGAAGAGCACACGTCTGAA (and reverse complement)
+           - Poly(>10)A/T
+  -p, --patterns <PATTERNS_PATH>
+          Start with patterns from a CSV file
+          Must have the following header:
+          pattern,color,editdistance,comment
+  -s, --save-patterns <SAVE_PATTERNS_PATH>
+          Save the search panel to a CSV file before quitting. To be moved to the search panel GUI in the future
+  -h, --help
+          Print help
+  -V, --version
+          Print version
+```
 ## Navigation
 ### Viewer mode
 ![Viewer mode](./img/viewer_mode.png)
@@ -24,12 +53,9 @@ You need to enable [Use Option as Meta key](https://support.apple.com/en-au/guid
 ## functionality 
  * With exact match, discard surrounding fuzzy match.  
  * Gzip (`fastq.gz`) support  
-  - FASTA / regular text file support?  
  * Filter reads by match  
  * Counting reads with match  
 ## UI
- * Arguments to start with default common primers (10x, Nanopore etc.)  
  * Make elements in the search panel clickable, try implementations discussed in [ratatui repo](https://github.com/ratatui-org/ratatui/discussions/552)  
 ## Misc
  * Unit tests  
- * Handle illegal seek panic for not seekable files (e.g. shell substitution)
