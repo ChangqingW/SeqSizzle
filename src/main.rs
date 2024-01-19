@@ -14,10 +14,14 @@ use ratatui::prelude::{CrosstermBackend, Terminal, Color};
 use std::path::PathBuf;
 use tui::Tui;
 use clap::Parser;
+use shadow_rs::shadow;
+
+shadow!(build);
 
 /// A pager for viewing FASTQ files with fuzzy matching, allowing different adaptors to be colored differently.
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, about, long_about = None)]
+#[command(version = build::CLAP_LONG_VERSION)]
 struct Args {
     /// The FASTQ file to view
     file: PathBuf,
@@ -44,6 +48,10 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+
+    if !shadow_rs::git_clean() {
+        print!("Warning: built with dirty repo:\n{}", shadow_rs::git_status_file());
+    }
 
     let args = Args::parse();
 
