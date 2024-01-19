@@ -10,6 +10,7 @@ dependencies = [
  "bio",
  "clap",
  "crossterm",
+ "csv",
  "gcollections",
  "intervallum",
  "num-traits",

@@ -42,9 +42,16 @@ struct Args {
     adapter_5p: bool,
 
     /// Start with patterns from a CSV file 
-    /// Not yet implemented
-    #[arg(short, long)]
-    patterns: Option<PathBuf>,
+    /// Must have the following header: 
+    /// pattern,color,editdistance,comment
+    #[clap(short = 'p', long = "patterns", verbatim_doc_comment)]
+    patterns_path: Option<PathBuf>,
+
+    // TODO: move to SearchPanel
+    /// Save the search panel to a CSV file before quitting. 
+    /// To be moved to the search panel GUI in the future.
+    #[clap(short = 's', long = "save-patterns")]
+    save_patterns_path: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -79,10 +86,30 @@ fn main() -> Result<()> {
             SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 0, None),
         ]);
     }
-    // TODO
-    //if let Some(path) = args.patterns {
-    //    // patterns.extend_from_slice();
-    //}
+
+    // add patterns from CSV file
+    if let Some(path) = args.patterns_path {
+        let err_str = "Error opening provided pattern CSV file";
+        let mut reader = csv::Reader::from_path(path).expect(err_str);
+        assert_eq!(reader.headers().expect("Error reading pattern CSV file headers").clone(),
+                   csv::StringRecord::from(vec!["pattern", "color", "editdistance", "comment"]),
+                   "Pattern CSV file headers must be: pattern,color,editdistance,comment");
+        reader.records().for_each(|record| {
+            
+            let record = record.expect(err_str);
+            let color = record.get(1).expect(err_str);
+            let editdistance = record.get(2).expect(err_str);
+            let comment = record.get(3).expect(err_str).parse::<String>().unwrap();
+            let pattern = SearchPattern::new(
+                record.get(0).expect(err_str).to_string(),
+                color.parse::<Color>().expect(format!("Error parsing pattern CSV file record color: {}", color).as_str()),
+                editdistance.parse::<u8>().expect(format!("Error parsing pattern CSV file record editdistance: {}", editdistance).as_str()),
+                if comment.is_empty() { None } else { Some(comment.as_str()) }
+            );
+            patterns.push(pattern);
+        });
+    }
+
     let mut app = App::new(&args.file, patterns);
 
 
@@ -146,6 +173,22 @@ fn main() -> Result<()> {
         tui.draw(&mut app)?;
     }
 
+    // Save the search panel to a CSV file
+    if args.save_patterns_path.is_some() {
+        let mut writer = csv::Writer::from_path(args.save_patterns_path.unwrap())?;
+        writer.write_record(&["pattern", "color", "editdistance", "comment"]).expect("Error writing pattern CSV file headers");
+        app.search_patterns.iter()
+            .for_each(|pattern| {
+                writer.write_record(&[
+                    pattern.search_string.clone(),
+                    pattern.color.to_string(),
+                    pattern.edit_distance.to_string(),
+                    pattern.comment.clone().unwrap_or("".to_string())
+                ]).expect("Error writing pattern CSV file record");
+            });
+        writer.flush()?;
+    }
+    
     // Exit the user interface.
     tui.exit()?;
     Ok(())
