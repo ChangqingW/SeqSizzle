@@ -1,4 +1,5 @@
-use crate::app::{App, SearchPanel, UIMode};
+use crate::app::{App, UIMode};
+use crate::search_panel::SearchPanel;
 use ratatui::{
     prelude::{Buffer, Color, Constraint, Direction, Frame, Layout, Line, Rect, Span, Style},
     widgets::{

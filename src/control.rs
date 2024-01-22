@@ -1,12 +1,12 @@
-use crate::app::{App, SearchPanelFocus, SearchPattern, UIMode};
+use crate::app::{App, SearchPattern, UIMode};
 use crate::{Event, Tui};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::{Color, Rect};
 use std::str::FromStr;
 
 pub enum Update {
-    SearchPanelFocus(SearchPanelFocus),
-    SearchPanelInput(SearchPanelFocus, KeyEvent),
+    ToggleSearchPanelFocus(bool),
+    SearchPanelInput(KeyEvent),
     EditSearchPattern(SearchPatternEdit),
     CycleSearchPattern(bool),
     ToggleUIMode,
@@ -22,21 +22,6 @@ pub enum SearchPatternEdit {
     Append(SearchPattern),
 }
 
-fn cycle_focus(focus: SearchPanelFocus, reverse: bool) -> SearchPanelFocus {
-    let list = vec![
-        SearchPanelFocus::PatternsList,
-        SearchPanelFocus::InputPattern,
-        SearchPanelFocus::InputColor,
-        SearchPanelFocus::InputDistance,
-    ];
-    let mut index = list.iter().position(|&x| x == focus).unwrap();
-    if reverse {
-        index = index.checked_sub(1).unwrap_or(list.len() - 1);
-    } else {
-        index = index.checked_add(1).unwrap_or(0);
-    }
-    list[if index >= list.len() { 0 } else { index }]
-}
 
 pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
     match input {
@@ -51,8 +36,8 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
             ..
         }) => Update::ToggleUIMode,
         Event::Key(keyevent) => match app.mode {
-            UIMode::Viewer(_) => handle_input_viewer(app, tui, keyevent),
-            UIMode::SearchPanel(_) => handle_input_search_panel(app, tui, keyevent),
+            UIMode::Viewer => handle_input_viewer(app, tui, keyevent),
+            UIMode::SearchPanel => handle_input_search_panel(app, tui, keyevent),
         },
         Event::Resize(_, _) => Update::WindowResize(tui.size()),
         _ => Update::None,
@@ -114,21 +99,11 @@ pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
 pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
     let state = app.mode.get_search_panel_state();
 
-    // ALT keys switch input focus regardless of current focus
-    if keyevent.modifiers == KeyModifiers::ALT {
-        match keyevent.code {
-            KeyCode::Char('1') => Update::SearchPanelFocus(SearchPanelFocus::PatternsList),
-            KeyCode::Char('2') => Update::SearchPanelFocus(SearchPanelFocus::InputPattern),
-            KeyCode::Char('3') => Update::SearchPanelFocus(SearchPanelFocus::InputColor),
-            KeyCode::Char('4') => Update::SearchPanelFocus(SearchPanelFocus::InputDistance),
-            _ => Update::None,
-        }
-
     // arrow keys switch input focus regardless of current focus
-    } else if keyevent.modifiers == KeyModifiers::NONE
+    if keyevent.modifiers == KeyModifiers::NONE
         && vec![KeyCode::Right, KeyCode::Left].contains(&keyevent.code)
     {
-        Update::SearchPanelFocus(cycle_focus(state.focus, keyevent.code == KeyCode::Left))
+        Update::SearchPanelFocus(keyevent.code == KeyCode::Left)
 
     // patterns list specific keybindings
     } else if state.focus == SearchPanelFocus::PatternsList {

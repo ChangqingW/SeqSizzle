@@ -4,6 +4,7 @@ pub mod event;
 pub mod io;
 pub mod read_stylizing;
 pub mod tui;
+pub mod search_panel;
 mod ui;
 
 use crate::control::{handle_input, SearchPatternEdit, Update};

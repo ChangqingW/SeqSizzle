@@ -1,5 +1,6 @@
 use crate::io::fastq::FastqReader;
 use crate::read_stylizing::highlight_matches;
+use crate::search_panel::SearchPanel;
 
 use bio::io::fastq;
 use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
@@ -60,101 +61,15 @@ impl SearchPattern {
     }
 }
 
-#[derive(Debug)]
-pub struct SearchPanel<'a> {
-    pub patterns_list: List<'a>,
-    pub input_pattern: TextArea<'a>,
-    pub input_color: TextArea<'a>,
-    pub input_distance: TextArea<'a>,
-    pub input_button: Paragraph<'a>, // dyn Widget
-}
-
-fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
-    List::new(
-        search_patterns
-            .iter()
-            .map(|x| {
-                ListItem::new(Line::from(vec![
-                    Span::styled(x.search_string.clone(), Style::new().fg(x.color)),
-                    Span::from(if x.comment.is_some() {
-                        format!(" ({}), ", x.comment.as_ref().unwrap())
-                    } else {
-                        String::from(", ")
-                    }),
-                    Span::styled(x.color.to_string(), Style::new().fg(x.color)),
-                    Span::from(format!(", edit-distance: {}", x.edit_distance)),
-                ]))
-            })
-            .collect::<Vec<ListItem>>(),
-    )
-    .block(
-        Block::default()
-            .title("Search patterns (ALT-1 to switch)")
-            .borders(Borders::ALL),
-    )
-    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-    .highlight_symbol("> ")
-}
-impl SearchPanel<'_> {
-    pub fn new(search_patterns: &[SearchPattern]) -> Self {
-        let mut ret = Self {
-            patterns_list: search_patterns_to_list(search_patterns),
-            input_pattern: TextArea::default(),
-            input_color: TextArea::default(),
-            input_distance: TextArea::default(),
-            input_button: Paragraph::new(
-                "Enter (when not selecting the patterns list) to add pattern",
-            )
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL))
-            .wrap(Wrap { trim: false }),
-        };
-        ret.input_pattern.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Search string (ALT-2)"),
-        );
-        ret.input_color.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Color (ALT-3)"),
-        );
-        ret.input_distance.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Edit distance (ALT-4)"),
-        );
-        ret
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub enum UIMode {
-    Viewer(SearchPanelState), // memorize search panel state
-    SearchPanel(SearchPanelState),
+    Viewer,
+    SearchPanel,
 }
 impl UIMode {
-    pub fn get_search_panel_state(&self) -> &SearchPanelState {
-        match self {
-            UIMode::Viewer(state) => state,
-            UIMode::SearchPanel(state) => state,
-        }
+    // TODO
+    pub fn get_search_panel_state(&self){
     }
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash, Copy)]
-pub enum SearchPanelFocus {
-    PatternsList,
-    InputPattern,
-    InputColor,
-    InputDistance,
-    InputButton,
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash, Copy)]
-pub struct SearchPanelState {
-    pub focus: SearchPanelFocus,
-    pub patterns_list_selection: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -192,10 +107,7 @@ impl App<'_> {
             quit: false,
             search_patterns: search_patterns.clone(),
             message: TransientMessage::default(),
-            mode: UIMode::Viewer(SearchPanelState {
-                focus: SearchPanelFocus::PatternsList,
-                patterns_list_selection: Some(0),
-            }),
+            mode: UIMode::Viewer,
             search_panel: SearchPanel::new(&search_patterns),
             file: Path::new(&file).to_path_buf(),
             reader,
@@ -203,7 +115,6 @@ impl App<'_> {
             rendered_lines: VecDeque::with_capacity(2 * (RENDER_BUF_SIZE + 1)),
             scroll_status: (0, 0),
         };
-        instance.highligh_search_panel_focus(SearchPanelFocus::PatternsList);
         instance.update();
         instance
     }
@@ -220,82 +131,27 @@ impl App<'_> {
 
     pub fn append_search_pattern(&mut self, pattern: SearchPattern) {
         self.search_patterns.push(pattern);
-        self.search_panel = SearchPanel::new(&self.search_patterns);
-        match &self.mode {
-            UIMode::SearchPanel(SearchPanelState { focus, .. }) => {
-                self.highligh_search_panel_focus(*focus)
-            }
-            any => panic!("Unexpected UI mode {:?}", any),
-        };
+        self.search_panel.clear_inputs();
+        self.search_panel.update(&self.search_patterns);
         self.update();
     }
 
     pub fn delete_search_pattern(&mut self, index: usize) -> SearchPattern {
         let pattern = self.search_patterns.remove(index);
-        self.search_panel = SearchPanel::new(&self.search_patterns);
-        match &self.mode {
-            UIMode::SearchPanel(SearchPanelState { focus, .. }) => {
-                self.highligh_search_panel_focus(*focus)
-            }
-            any => panic!("Unexpected UI mode {:?}", any),
-        };
+        self.search_panel.update(&self.search_patterns);
         self.update();
-        if self.search_patterns.len() == 0 {
-            self.mode = UIMode::SearchPanel(SearchPanelState {
-                focus: SearchPanelFocus::PatternsList,
-                patterns_list_selection: None,
-            });
-        } else if index >= self.search_patterns.len() {
-            self.mode = UIMode::SearchPanel(SearchPanelState {
-                focus: SearchPanelFocus::PatternsList,
-                patterns_list_selection: Some(self.search_patterns.len() - 1),
-            });
-        }
         return pattern;
     }
 
     pub fn edit_search_pattern(&mut self, index: usize) {
         let pattern: SearchPattern = self.delete_search_pattern(index);
-        self.search_panel.input_pattern = TextArea::new(vec![pattern.search_string]);
-        self.search_panel.input_color = TextArea::new(vec![pattern.color.to_string()]);
-        self.search_panel.input_distance = TextArea::new(vec![pattern.edit_distance.to_string()]);
-        self.search_panel.input_pattern.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Search string (ALT-2)"), // TODO: move search panel title & boarder to
-                                                 // ui.rs?
-        );
-        self.search_panel.input_color.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Color (ALT-3)"),
-        );
-        self.search_panel.input_distance.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Edit distance (ALT-4)"),
-        );
-
-        self.search_panel
-            .input_pattern
-            .move_cursor(CursorMove::Bottom);
-        self.search_panel
-            .input_color
-            .move_cursor(CursorMove::Bottom);
-        self.search_panel
-            .input_distance
-            .move_cursor(CursorMove::Bottom);
-        self.search_panel.input_pattern.move_cursor(CursorMove::End);
-        self.search_panel.input_color.move_cursor(CursorMove::End);
-        self.search_panel
-            .input_distance
-            .move_cursor(CursorMove::End);
+        self.search_panel.edit_pattern(pattern);
     }
 
     pub fn toggle_ui_mode(&mut self) {
         match &self.mode {
-            UIMode::Viewer(focus) => self.mode = UIMode::SearchPanel(*focus),
-            UIMode::SearchPanel(focus) => self.mode = UIMode::Viewer(*focus),
+            UIMode::Viewer => self.mode = UIMode::SearchPanel,
+            UIMode::SearchPanel => self.mode = UIMode::Viewer,
         };
     }
 
@@ -413,108 +269,16 @@ impl App<'_> {
         self.update();
     }
 
-    fn highligh_search_panel_focus(&mut self, focus: SearchPanelFocus) {
-        match self.mode.get_search_panel_state().focus {
-            SearchPanelFocus::PatternsList => {
-                self.search_panel.patterns_list = self.search_panel.patterns_list.clone().block(
-                    Block::default()
-                        .title("Search patterns (ALT-1 to switch)")
-                        .borders(Borders::ALL),
-                )
-            }
-            SearchPanelFocus::InputPattern => self.search_panel.input_pattern.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Search string (ALT-2)"),
-            ),
-            SearchPanelFocus::InputColor => self.search_panel.input_color.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Color (ALT-3)"),
-            ),
-            SearchPanelFocus::InputDistance => self.search_panel.input_distance.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Edit distance (ALT-4)"),
-            ),
-            SearchPanelFocus::InputButton => (),
-        };
-        match focus {
-            SearchPanelFocus::PatternsList => {
-                self.search_panel.patterns_list = self.search_panel.patterns_list.clone().block(
-                    Block::default()
-                        .title("Search patterns (up / down to select patterns, enter to edit pattern, delete to delete)")
-                .title(Title::from("left / right arrow keys to navigate between boxes").position(Position::Bottom))
-                        .borders(Borders::ALL)
-                        .border_style(self.active_boarder_style),
-                )
-            }
-            SearchPanelFocus::InputPattern => self.search_panel.input_pattern.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(self.active_boarder_style)
-                    .title("Search string"),
-            ),
-            SearchPanelFocus::InputColor => self.search_panel.input_color.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(self.active_boarder_style)
-                    .title("Color"),
-            ),
-            SearchPanelFocus::InputDistance => self.search_panel.input_distance.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(self.active_boarder_style)
-                    .title("Edit distance"),
-            ),
-            SearchPanelFocus::InputButton => (),
-        };
-    }
-
-    pub fn focus_search_panel(&mut self, focus: SearchPanelFocus) {
-        self.highligh_search_panel_focus(focus);
-        self.mode = UIMode::SearchPanel(SearchPanelState {
-            focus,
-            patterns_list_selection: self.mode.get_search_panel_state().patterns_list_selection,
-        });
-    }
+    // pub fn focus_search_panel(&mut self, focus: SearchPanelFocus) {
+    //     self.highligh_search_panel_focus(focus);
+    //     self.mode = UIMode::SearchPanel(SearchPanelState {
+    //         focus,
+    //         patterns_list_selection: self.mode.get_search_panel_state().patterns_list_selection,
+    //     });
+    // }
 
     pub fn cycle_patterns_list(&mut self, reverse: bool) {
-        if self.search_patterns.len() == 0 {
-            self.mode = UIMode::SearchPanel(SearchPanelState {
-                focus: self.mode.get_search_panel_state().focus,
-                patterns_list_selection: None,
-            });
-            return;
-        }
-        let new_selection = match self.mode.get_search_panel_state().patterns_list_selection {
-            Some(selection) => {
-                if reverse {
-                    Some(
-                        selection
-                            .checked_sub(1)
-                            .unwrap_or(self.search_patterns.len() - 1),
-                    )
-                } else {
-                    if selection == self.search_patterns.len() - 1 {
-                        Some(0)
-                    } else {
-                        Some(selection + 1)
-                    }
-                }
-            }
-            None => {
-                if reverse {
-                    Some(self.search_patterns.len() - 1)
-                } else {
-                    Some(0)
-                }
-            }
-        };
-        self.mode = UIMode::SearchPanel(SearchPanelState {
-            focus: self.mode.get_search_panel_state().focus,
-            patterns_list_selection: new_selection,
-        });
+        self.search_panel.cycle_patterns_list(reverse);
     }
 
     pub fn set_message(&mut self, msg: String) {
