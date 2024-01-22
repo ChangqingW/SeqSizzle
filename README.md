@@ -51,7 +51,6 @@ You need to enable [Use Option as Meta key](https://support.apple.com/en-au/guid
 
 # Roadmap
 ## functionality 
- * With exact match, discard surrounding fuzzy match.  
  * Gzip (`fastq.gz`) support  
  * Filter reads by match  
  * Counting reads with match  

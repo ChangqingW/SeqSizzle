@@ -613,10 +613,22 @@ impl App<'_> {
         }
 
         let mut myers: Myers<T> = builder.build(pattern.search_string.clone().into_bytes());
-        myers
-            .find_all(record.seq(), pattern.edit_distance.into())
-            .map(|(a, b, _)| (a, b - 1))
-            .collect::<Vec<(usize, usize)>>()
-            .to_interval_set()
+        let mut matches = myers.find_all(record.seq(), pattern.edit_distance.into())
+            .map(|(start, end, dist)| (start, end - 1, dist))
+            .collect::<Vec<(usize, usize, <T as BitVec>::DistType)>>();
+        matches.sort_by_key(|(_, _, dist)| *dist);
+
+        // remove overlaps when better matches are found
+        let mut filtered_matches: Vec<(usize, usize)> = Vec::new();
+        for m in matches {
+            if filtered_matches
+                .iter()
+                .all(|(start, end)| m.0 > *end  || m.1 < *start)
+            {
+                filtered_matches.push((m.0, m.1));
+            }
+        }
+
+        filtered_matches.to_interval_set()
     }
 }

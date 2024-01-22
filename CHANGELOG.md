@@ -2,6 +2,9 @@
 
 Notable changes to this project will be documented in this file.
 
+## WIP
+ * With exact match, discard surrounding fuzzy match.  
+
 ## [0.1.0] - Initial release
  * Fixed backspace cannot delete patterns in search panel
  * Added read / save search patterns with CSV file
