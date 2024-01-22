@@ -619,16 +619,20 @@ impl App<'_> {
         matches.sort_by_key(|(_, _, dist)| *dist);
 
         // remove overlaps when better matches are found
-        let mut filtered_matches: Vec<(usize, usize)> = Vec::new();
+        let mut filtered_matches: Vec<(usize, usize, <T as BitVec>::DistType)> = Vec::new();
         for m in matches {
             if filtered_matches
                 .iter()
-                .all(|(start, end)| m.0 > *end  || m.1 < *start)
+                .all(|(start, end, dist)| *dist == m.2 ||  m.0 > *end || m.1 < *start)
             {
-                filtered_matches.push((m.0, m.1));
+                filtered_matches.push(m);
             }
         }
 
-        filtered_matches.to_interval_set()
+        filtered_matches
+            .into_iter()
+            .map(|(start, end, _)| (start, end))
+            .collect::<Vec<(usize, usize)>>()
+            .to_interval_set()
     }
 }
