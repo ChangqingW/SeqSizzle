@@ -139,22 +139,11 @@ fn main() -> Result<()> {
                 app.quit = true;
                 break;
             }
-            Update::SearchPanelFocus(focus) => {
-                app.focus_search_panel(focus);
+            Update::SearchPanelFocusNext(reverse) => {
+                app.search_panel.focus_next(reverse);
             }
-            Update::SearchPanelInput(focus, input) => {
-                match focus {
-                    app::SearchPanelFocus::InputPattern => {
-                        app.search_panel.input_pattern.input(input);
-                    }
-                    app::SearchPanelFocus::InputColor => {
-                        _ = app.search_panel.input_color.input(input)
-                    }
-                    app::SearchPanelFocus::InputDistance => {
-                        _ = app.search_panel.input_distance.input(input)
-                    }
-                    _ => {}
-                };
+            Update::SearchPanelInput(input) => {
+                app.search_panel.handle_input(input);
             }
             Update::EditSearchPattern(edit) => match edit {
                 SearchPatternEdit::Append(x) => app.append_search_pattern(x),

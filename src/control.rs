@@ -1,11 +1,12 @@
 use crate::app::{App, SearchPattern, UIMode};
+use crate::search_panel::{PanelElement, PanelElementName};
 use crate::{Event, Tui};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::prelude::{Color, Rect};
 use std::str::FromStr;
 
 pub enum Update {
-    ToggleSearchPanelFocus(bool),
+    SearchPanelFocusNext(bool),
     SearchPanelInput(KeyEvent),
     EditSearchPattern(SearchPatternEdit),
     CycleSearchPattern(bool),
@@ -21,7 +22,6 @@ pub enum SearchPatternEdit {
     Delete(usize, bool), // (index, pop into edit boxes?)
     Append(SearchPattern),
 }
-
 
 pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
     match input {
@@ -97,16 +97,14 @@ pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
 }
 
 pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
-    let state = app.mode.get_search_panel_state();
-
     // arrow keys switch input focus regardless of current focus
     if keyevent.modifiers == KeyModifiers::NONE
         && vec![KeyCode::Right, KeyCode::Left].contains(&keyevent.code)
     {
-        Update::SearchPanelFocus(keyevent.code == KeyCode::Left)
+        Update::SearchPanelFocusNext(keyevent.code == KeyCode::Left)
 
     // patterns list specific keybindings
-    } else if state.focus == SearchPanelFocus::PatternsList {
+    } else if app.search_panel.focused_element() == PanelElementName::PatternsList {
         match keyevent {
             KeyEvent {
                 code: KeyCode::Up | KeyCode::Down,
@@ -117,7 +115,7 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
                 code: KeyCode::Char('d') | KeyCode::Delete | KeyCode::Enter | KeyCode::Backspace,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => match state.patterns_list_selection {
+            } => match app.search_panel.selected_pattern() {
                 Some(selection) => Update::EditSearchPattern(SearchPatternEdit::Delete(
                     selection,
                     keyevent.code == KeyCode::Enter,
@@ -126,15 +124,33 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
             },
             _ => Update::None,
         }
-    } else if state.focus != SearchPanelFocus::PatternsList
-        && keyevent.modifiers == KeyModifiers::NONE
-        && keyevent.code == KeyCode::Enter
-    {
-        let search_string: String = app.search_panel.input_pattern.lines().join("");
-        let try_color = Color::from_str(&app.search_panel.input_color.lines().join(""));
-        let try_u8 = u8::from_str(&app.search_panel.input_distance.lines().join(""));
+
+    // focus != PanelElementName::PatternsList
+    } else if keyevent.modifiers == KeyModifiers::NONE && keyevent.code == KeyCode::Enter {
+        let search_string = match app.search_panel.elements()[&PanelElementName::InputPattern] {
+            PanelElement::TextAreaElement(ref textarea) => textarea.lines().join(""),
+            _ => panic!("Wrong type of element"),
+        };
+        let try_color = Color::from_str(
+            match app.search_panel.elements()[&PanelElementName::InputColor] {
+                PanelElement::TextAreaElement(ref textarea) => textarea.lines().join(""),
+                _ => panic!("Wrong type of element"),
+            }
+            .as_str(),
+        );
+        let try_u8 = u8::from_str(
+            match app.search_panel.elements()[&PanelElementName::InputDistance] {
+                PanelElement::TextAreaElement(ref textarea) => textarea.lines().join(""),
+                _ => panic!("Wrong type of element"),
+            }
+            .as_str(),
+        );
+        let comment = match app.search_panel.elements()[&PanelElementName::InputComment] {
+            PanelElement::TextAreaElement(ref textarea) => textarea.lines().join(""),
+            _ => panic!("Wrong type of element"),
+        };
         match (try_color, try_u8) {
-                                       (Ok(color), Ok(distance)) => {Update::EditSearchPattern(SearchPatternEdit::Append(SearchPattern::new(search_string, color, distance, None)))},
+                                       (Ok(color), Ok(distance)) => {Update::EditSearchPattern(SearchPatternEdit::Append(SearchPattern::new(search_string, color, distance, if comment.is_empty() { None } else { Some(comment.as_str()) })))},
                                        (Err(_), Ok(_)) => {Update::Msg("Color needs to be valid hex code".to_string())},
                                        (Ok(_), Err(_)) => {Update::Msg("Edit distance needs to be valid positive integer".to_string())},
                                        (Err(_), Err(_)) => {Update::Msg("Color needs to be valid hex code, edit distance needs to be valid positive integer".to_string())},
@@ -142,6 +158,6 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
 
     // pass to input boxes
     } else {
-        Update::SearchPanelInput(state.focus, keyevent)
+        Update::SearchPanelInput(keyevent)
     }
 }

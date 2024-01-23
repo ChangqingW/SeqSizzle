@@ -1,4 +1,6 @@
 use crate::app::SearchPattern;
+use crossterm::event::KeyEvent;
+use once_cell::sync::Lazy;
 use ratatui::prelude::{
     Alignment, Buffer, Color, Constraint, Direction, Layout, Line, Modifier, Rect, Span, Style,
     Stylize,
@@ -7,11 +9,11 @@ use ratatui::widgets::{
     block::title::{Position, Title},
     Block, Borders, Clear, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
 };
+use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::collections::HashMap;
 use tui_textarea::{CursorMove, TextArea};
 
-const ACTIVE_BOARDER_STYLE: Style = Style::new().red().bold();
+const ACTIVE_BOARDER_STYLE: Lazy<Style> = Lazy::new(|| Style::new().red().bold());
 
 fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
     List::new(
@@ -91,6 +93,11 @@ impl<'a> StatefulList<'a> {
         self.list = self.list.block(block);
         self
     }
+
+    /// return the selected index
+    pub fn selected(&self) -> Option<usize> {
+        self.state.selected()
+    }
 }
 
 /// Re-exported List method
@@ -102,7 +109,7 @@ impl<'a> Widget for StatefulList<'a> {
 
 /// Element that change block appearance when focused
 #[derive(Debug, Clone)]
-struct FocusableElement<'a, T> {
+pub struct FocusableElement<'a, T> {
     element: T,
     focused_block: Block<'a>, // block to render when focused
 }
@@ -162,10 +169,15 @@ impl<'a> FocusableElement<'a, TextArea<'a>> {
         self.element.delete_line_by_end();
         self.element.delete_line_by_head();
     }
+
+    /// Re-exported lines() method
+    pub fn lines(&self) -> &[String] {
+        self.element.lines()
+    }
 }
 
 #[derive(Debug, Clone)]
-enum PanelElement<'a> {
+pub enum PanelElement<'a> {
     ListElement(FocusableElement<'a, StatefulList<'a>>),
     TextAreaElement(FocusableElement<'a, TextArea<'a>>),
 }
@@ -178,55 +190,100 @@ impl PanelElement<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum SearchPanelElement {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PanelElementName {
     PatternsList,
     InputPattern,
     InputColor,
     InputDistance,
     InputComment,
 }
-
-#[derive(Debug, Clone)]
-pub struct SearchPanel<'a> {
-    // Maybe use a HashMap instead?
-    // elements: HashMap<SearchPanelElement, PanelElement<'a>>,
-    patterns_list: PanelElement<'a>,  // 0
-    input_pattern: PanelElement<'a>,  // 1
-    input_color: PanelElement<'a>,    // 2
-    input_distance: PanelElement<'a>, // 3
-    input_comment: PanelElement<'a>,  // 4
-    focused_element: Option<usize>,
-    layout: fn(Rect) -> Rc<[Rect]>,
-}
-const SEARCH_PANEL_LEN: usize = 5;
-
-impl<'a> SearchPanel<'a> {
-    /// focus the next element in the given direction (true for forward, false for backward)
-    fn focus_next(&mut self, direction: bool) {
-        if self.focused_element.is_none() {
-            self.focused_element = Some(0);
+impl PanelElementName {
+    fn next(&self, reverse: bool) -> Self {
+        if reverse {
+            match self {
+                PanelElementName::PatternsList => PanelElementName::InputComment,
+                PanelElementName::InputPattern => PanelElementName::PatternsList,
+                PanelElementName::InputColor => PanelElementName::InputPattern,
+                PanelElementName::InputDistance => PanelElementName::InputColor,
+                PanelElementName::InputComment => PanelElementName::InputDistance,
+            }
         } else {
-            let mut new_focus = self.focused_element.unwrap();
-            if direction {
-                new_focus += 1;
-            } else {
-                new_focus -= 1;
+            match self {
+                PanelElementName::PatternsList => PanelElementName::InputPattern,
+                PanelElementName::InputPattern => PanelElementName::InputColor,
+                PanelElementName::InputColor => PanelElementName::InputDistance,
+                PanelElementName::InputDistance => PanelElementName::InputComment,
+                PanelElementName::InputComment => PanelElementName::PatternsList,
             }
-            if new_focus >= SEARCH_PANEL_LEN {
-                new_focus = 0;
-            } else if new_focus < 0 {
-                new_focus = SEARCH_PANEL_LEN - 1;
-            }
-            self.focused_element = Some(new_focus);
         }
     }
 
+    /// Title to display
+    fn title(&self) -> &'static str {
+        match self {
+            PanelElementName::PatternsList => {
+                "Search patterns (up / down to select patterns, enter / delete to edit or delete)"
+            } // Not in use currently
+            PanelElementName::InputPattern => "Search String",
+            PanelElementName::InputColor => "Color",
+            PanelElementName::InputDistance => "Edit distance",
+            PanelElementName::InputComment => "Comment (optional)",
+        }
+    }
+
+    fn all_values() -> [PanelElementName; 5] {
+        [
+            PanelElementName::PatternsList,
+            PanelElementName::InputPattern,
+            PanelElementName::InputColor,
+            PanelElementName::InputDistance,
+            PanelElementName::InputComment,
+        ]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchPanel<'a> {
+    elements: BTreeMap<PanelElementName, PanelElement<'a>>,
+    focused_element: PanelElementName, // must have a focused element
+    layout: fn(Rect) -> Rc<[Rect]>,
+}
+
+impl<'a> SearchPanel<'a> {
+    /// focus the next element in the given direction (true for forward, false for backward)
+    pub fn focus_next(&mut self, reverse: bool) {
+        self.focused_element = self.focused_element.next(reverse);
+    }
+
+    /// cycle through the list of patterns selection
     pub fn cycle_patterns_list(&mut self, reverse: bool) {
-        match &mut self.patterns_list {
+        match self
+            .elements
+            .get_mut(&PanelElementName::PatternsList)
+            .unwrap()
+        {
             PanelElement::ListElement(list) => list.next(reverse),
             _ => panic!("Wrong type of element"),
         }
+    }
+
+    /// return the name of the focused element
+    pub fn focused_element(&self) -> PanelElementName {
+        self.focused_element.clone()
+    }
+
+    /// return the selected index of the patterns list
+    pub fn selected_pattern(&self) -> Option<usize> {
+        match &self.elements[&PanelElementName::PatternsList] {
+            PanelElement::ListElement(list) => list.element.selected(),
+            _ => panic!("Wrong type of element"),
+        }
+    }
+
+    /// return a reference to the elements map
+    pub fn elements(&self) -> &BTreeMap<PanelElementName, PanelElement<'a>> {
+        &self.elements
     }
 
     pub fn new(search_patterns: &[SearchPattern]) -> Self {
@@ -245,171 +302,141 @@ impl<'a> SearchPanel<'a> {
                         Constraint::Percentage(25),
                         Constraint::Percentage(25),
                     ])
-                    .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .split(vert_chunk[0])
+                    .split(vert_chunk[1])
                     .iter(),
             );
             Rc::from(chunks)
         }
 
-        let input_pattern = PanelElement::TextAreaElement(FocusableElement::new_textarea_element(
-            {
-                let mut input = TextArea::default();
-                input.set_block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Search string"),
-                );
-                input
-            },
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(ACTIVE_BOARDER_STYLE)
-                .title("Search string"),
-        ));
-        let input_color = PanelElement::TextAreaElement(FocusableElement::new_textarea_element(
-            {
-                let mut input = TextArea::default();
-                input.set_block(Block::default().borders(Borders::ALL).title("Color"));
-                input
-            },
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(ACTIVE_BOARDER_STYLE)
-                .title("Color"),
-        ));
-        let input_distance = PanelElement::TextAreaElement(FocusableElement::new_textarea_element(
-            {
-                let mut input = TextArea::default();
-                input.set_block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Edit distance"),
-                );
-                input
-            },
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(ACTIVE_BOARDER_STYLE)
-                .title("Edit distance"),
-        ));
-        let input_comment = PanelElement::TextAreaElement(FocusableElement::new_textarea_element(
-            {
-                let mut input = TextArea::default();
-                input.set_block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Comment (optional)"),
-                );
-                input
-            },
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(ACTIVE_BOARDER_STYLE)
-                .title("Comment (optional)"),
-        ));
-
         let patterns_list = PanelElement::ListElement(FocusableElement::new_list_elment(
             StatefulList::from_search_patterns(search_patterns),
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(ACTIVE_BOARDER_STYLE)
+                .border_style(*ACTIVE_BOARDER_STYLE)
                 .title("Search patterns"),
         ));
 
+        let mut elements: BTreeMap<PanelElementName, PanelElement> = BTreeMap::new();
+        elements.insert(PanelElementName::PatternsList, patterns_list);
+        for element in [
+            PanelElementName::InputPattern,
+            PanelElementName::InputColor,
+            PanelElementName::InputDistance,
+            PanelElementName::InputComment,
+        ]
+        .into_iter()
+        {
+            elements.insert(
+                element.clone(),
+                PanelElement::TextAreaElement(FocusableElement::new_textarea_element(
+                    {
+                        let mut input = TextArea::default();
+                        input.set_block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .title(element.title()),
+                        );
+                        input
+                    },
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(*ACTIVE_BOARDER_STYLE)
+                        .title(element.title()),
+                )),
+            );
+        }
+
         Self {
-            patterns_list,
-            input_pattern,
-            input_color,
-            input_distance,
-            input_comment,
-            focused_element: None,
+            elements,
+            focused_element: PanelElementName::PatternsList,
             layout,
         }
     }
 
     /// update the list of search patterns
     pub fn update(&mut self, search_patterns: &[SearchPattern]) {
-        match &mut self.patterns_list {
+        match self
+            .elements
+            .get_mut(&PanelElementName::PatternsList)
+            .unwrap()
+        {
             PanelElement::ListElement(list) => list.update(search_patterns),
             _ => panic!("Wrong type of element"),
         }
     }
 
+    /// Clear all TextArea elements' inptus
     pub fn clear_inputs(&mut self) {
-        for element in [
-            &mut self.input_pattern,
-            &mut self.input_color,
-            &mut self.input_distance,
-            &mut self.input_comment,
-        ].iter() {
-            match element {
+        self.elements
+            .values_mut()
+            .for_each(|element| match element {
                 PanelElement::TextAreaElement(textarea) => textarea.clear(),
-                _ => panic!("Wrong type of element"),
-            }
-        }
+                _ => (),
+            });
     }
 
+    /// Instert the given pattern to the input fields
     pub fn edit_pattern(&mut self, pattern: SearchPattern) {
+        // clear all inputs
         self.clear_inputs();
-        match &mut self.input_pattern {
-            PanelElement::TextAreaElement(textarea) => {
-                textarea.element.insert_str(pattern.search_string);
-                textarea.element.move_cursor(CursorMove::Bottom);
-                textarea.element.move_cursor(CursorMove::End);
+
+        // insert values
+        for (element_name, element) in self.elements.iter_mut() {
+            match element {
+                PanelElement::TextAreaElement(textarea) => match element_name {
+                    PanelElementName::InputPattern => {
+                        textarea.element.insert_str(pattern.search_string.clone());
+                    }
+                    PanelElementName::InputColor => {
+                        textarea.element.insert_str(pattern.color.to_string());
+                    }
+                    PanelElementName::InputDistance => {
+                        textarea
+                            .element
+                            .insert_str(pattern.edit_distance.to_string());
+                    }
+                    PanelElementName::InputComment => {
+                        if let Some(ref comment) = pattern.comment {
+                            textarea.element.insert_str(comment);
+                        }
+                    }
+                    _ => (),
+                },
+                _ => (),
             }
-            _ => panic!("Wrong type of element"),
         }
-        match &mut self.input_color {
-            PanelElement::TextAreaElement(textarea) => {
-                textarea.element.insert_str(pattern.color.to_string());
-                textarea.element.move_cursor(CursorMove::Bottom);
-                textarea.element.move_cursor(CursorMove::End);
-            }
-            _ => panic!("Wrong type of element"),
-        }
-        match &mut self.input_distance {
-            PanelElement::TextAreaElement(textarea) => {
-                textarea.element.insert_str(pattern.edit_distance.to_string());
-                textarea.element.move_cursor(CursorMove::Bottom);
-                textarea.element.move_cursor(CursorMove::End);
-            }
-            _ => panic!("Wrong type of element"),
-        }
-        match &mut self.input_comment {
-            PanelElement::TextAreaElement(textarea) => {
-                if let Some(comment) = &pattern.comment {
-                    textarea.element.insert_str(comment);
+
+        // move cursor to end
+        for element in self.elements.values_mut() {
+            match element {
+                PanelElement::TextAreaElement(textarea) => {
                     textarea.element.move_cursor(CursorMove::Bottom);
                     textarea.element.move_cursor(CursorMove::End);
-                } else {
-                    textarea.element.insert_str(String::new());
                 }
+                _ => (),
             }
-            _ => panic!("Wrong type of element"),
         }
     }
 
-    pub fn focused_on_patterns_list(&self) -> bool {
-        self.focused_element == Some(0)
+    /// pass input to focused element
+    pub fn handle_input(&mut self, keyevent: KeyEvent) {
+        match self.elements.get_mut(&self.focused_element).unwrap() {
+            PanelElement::TextAreaElement(textarea) => {
+                textarea.element.input(keyevent);
+            }
+            // slightly inconsistent, but
+            // keep list operations in main.rs
+            _ => panic!("Wrong type of element"),
+        }
     }
 }
 
-impl Widget for SearchPanel<'_> {
+impl Widget for &SearchPanel<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let chunks = (self.layout)(area);
-        assert_eq!(chunks.len(), SEARCH_PANEL_LEN);
-        for (i, element) in [
-            self.patterns_list,
-            self.input_pattern,
-            self.input_color,
-            self.input_distance,
-            self.input_comment,
-        ]
-        .iter()
-        .enumerate()
-        {
-            element.render(chunks[i], buf, self.focused_element == Some(i));
+        assert_eq!(chunks.len(), self.elements.len());
+        for (i, (element_name, element)) in self.elements.iter().enumerate() {
+            element.render(chunks[i], buf, *element_name == self.focused_element);
         }
     }
 }

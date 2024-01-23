@@ -66,11 +66,6 @@ pub enum UIMode {
     Viewer,
     SearchPanel,
 }
-impl UIMode {
-    // TODO
-    pub fn get_search_panel_state(&self){
-    }
-}
 
 #[derive(Debug)]
 pub struct TransientMessage {
