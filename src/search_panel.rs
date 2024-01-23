@@ -22,8 +22,8 @@ fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
             .map(|x| {
                 ListItem::new(Line::from(vec![
                     Span::styled(x.search_string.clone(), Style::new().fg(x.color)),
-                    Span::from(if x.comment.is_some() {
-                        format!(" ({}), ", x.comment.as_ref().unwrap())
+                    Span::from(if !x.comment.is_empty() {
+                        format!(" ({}), ", x.comment)
                     } else {
                         String::from(", ")
                     }),
@@ -396,9 +396,7 @@ impl<'a> SearchPanel<'a> {
                             .insert_str(pattern.edit_distance.to_string());
                     }
                     PanelElementName::InputComment => {
-                        if let Some(ref comment) = pattern.comment {
-                            textarea.element.insert_str(comment);
-                        }
+                            textarea.element.insert_str(pattern.comment.clone());
                     }
                     _ => (),
                 },

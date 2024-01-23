@@ -43,20 +43,20 @@ pub struct SearchPattern {
     pub search_string: String,
     pub color: Color,
     pub edit_distance: u8,
-    pub comment: Option<String>,
+    pub comment: String,
 }
 impl SearchPattern {
     pub fn new(
         search_string: String,
         color: Color,
         edit_distance: u8,
-        comment: Option<&str>,
+        comment: &str,
     ) -> Self {
         Self {
             search_string,
             color,
             edit_distance,
-            comment: comment.map(|x| x.to_string()),
+            comment: comment.to_string(),
         }
     }
 }

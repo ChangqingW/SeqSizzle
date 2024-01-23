@@ -67,24 +67,24 @@ fn main() -> Result<()> {
     let mut patterns: Vec<SearchPattern> = Vec::new();
     if args.adapter_3p {
         patterns.extend_from_slice(&[
-            SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3, Some("R1")),
-            SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3, Some("TSO")),
-            SearchPattern::new("TGGTATCAACGCAGAGTACATGGG".to_string(), Color::Red, 3, Some("R1 rev")),
-            SearchPattern::new("CCCATGTACTCTGCGTTGATACCA".to_string(), Color::Yellow, 3, Some("TSO rev")),
-            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 0, None),
-            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 0, None),
+            SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3, "R1"),
+            SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3, "TSO"),
+            SearchPattern::new("TGGTATCAACGCAGAGTACATGGG".to_string(), Color::Red, 3, "R1 rev"),
+            SearchPattern::new("CCCATGTACTCTGCGTTGATACCA".to_string(), Color::Yellow, 3, "TSO rev"),
+            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 0, ""),
+            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 0, ""),
         ]);
     }
     if args.adapter_5p {
         patterns.extend_from_slice(&[
-            SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3, Some("R1")),
-            SearchPattern::new("TTTCTTATATGGG".to_string(), Color::Green, 2, Some("TSO")),
-            SearchPattern::new("TGGTATCAACGCAGAGTACATGGG".to_string(), Color::Red, 3, Some("R1 rev")),
-            SearchPattern::new("CCCATATAAGAAA".to_string(), Color::Yellow, 2, Some("TSO rev")),
-            SearchPattern::new("AGATCGGAAGAGCACACGTCTGAA".to_string(), Color::Cyan, 3, Some("R2")),
-            SearchPattern::new("TTCAGACGTGTGCTCTTCCGATCT".to_string(), Color::Magenta, 3, Some("R2 rev")),
-            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 0, None),
-            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 0, None),
+            SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3, "R1"),
+            SearchPattern::new("TTTCTTATATGGG".to_string(), Color::Green, 2, "TSO"),
+            SearchPattern::new("TGGTATCAACGCAGAGTACATGGG".to_string(), Color::Red, 3, "R1 rev"),
+            SearchPattern::new("CCCATATAAGAAA".to_string(), Color::Yellow, 2, "TSO rev"),
+            SearchPattern::new("AGATCGGAAGAGCACACGTCTGAA".to_string(), Color::Cyan, 3, "R2"),
+            SearchPattern::new("TTCAGACGTGTGCTCTTCCGATCT".to_string(), Color::Magenta, 3, "R2 rev"),
+            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 0, ""),
+            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 0, ""),
         ]);
     }
 
@@ -105,7 +105,7 @@ fn main() -> Result<()> {
                 record.get(0).expect(err_str).to_string(),
                 color.parse::<Color>().expect(format!("Error parsing pattern CSV file record color: {}", color).as_str()),
                 editdistance.parse::<u8>().expect(format!("Error parsing pattern CSV file record editdistance: {}", editdistance).as_str()),
-                if comment.is_empty() { None } else { Some(comment.as_str()) }
+                comment.as_str(),
             );
             patterns.push(pattern);
         });
@@ -148,8 +148,11 @@ fn main() -> Result<()> {
             Update::EditSearchPattern(edit) => match edit {
                 SearchPatternEdit::Append(x) => app.append_search_pattern(x),
                 SearchPatternEdit::Delete(index, pop) => {
-                    if pop {
+                    if pop { 
+                        // pop current pattern into edit boxs
                         app.edit_search_pattern(index);
+                        // focus on pattern edit box
+                        app.search_panel.focus_next(false); 
                     } else {
                         app.delete_search_pattern(index);
                     }
@@ -173,7 +176,7 @@ fn main() -> Result<()> {
                     pattern.search_string.clone(),
                     pattern.color.to_string(),
                     pattern.edit_distance.to_string(),
-                    pattern.comment.clone().unwrap_or("".to_string())
+                    pattern.comment.to_string(),
                 ]).expect("Error writing pattern CSV file record");
             });
         writer.flush()?;
