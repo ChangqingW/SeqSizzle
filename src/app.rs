@@ -10,7 +10,7 @@ use ratatui::prelude::{Color, Line, Rect};
 
 use rayon::prelude::*;
 use std::collections::VecDeque;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 
@@ -55,7 +55,7 @@ impl SearchPattern {
 #[derive(Debug, PartialEq)]
 pub enum UIMode {
     Viewer,
-    SearchPanel,
+    SearchPanel(bool), // bool: save file popup
 }
 
 #[derive(Default, Debug)]
@@ -130,9 +130,48 @@ impl App<'_> {
 
     pub fn toggle_ui_mode(&mut self) {
         match &self.mode {
-            UIMode::Viewer => self.mode = UIMode::SearchPanel,
-            UIMode::SearchPanel => self.mode = UIMode::Viewer,
+            UIMode::Viewer => self.mode = UIMode::SearchPanel(false),
+            UIMode::SearchPanel(_) => self.mode = UIMode::Viewer,
         };
+    }
+
+    pub fn save_patterns(&self) -> Option<String> {
+        let path = self.search_panel.file_save_popup_lines();
+        if path.len() != 1 {
+           return Some(String::from("Malformed file path"));
+        }
+        let path = Path::new(&path[0]);
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path);
+        if let Err(e) = file {
+            match e.kind() {
+                std::io::ErrorKind::NotFound => Some(String::from("File path not found")),
+                std::io::ErrorKind::PermissionDenied => Some(String::from("Permission denied")),
+                std::io::ErrorKind::AlreadyExists => Some(String::from("File already exists")),
+                _ => panic!("Unexpected error while saving search patterns: {:?}", e),
+            }
+        } else {
+            let mut writer = csv::Writer::from_writer(file.unwrap());
+        writer
+            .write_record(["pattern", "color", "editdistance", "comment"])
+            .expect("Error writing pattern CSV file headers");
+        self.search_patterns.iter().for_each(|pattern| {
+            writer
+                .write_record(&[
+                    pattern.search_string.clone(),
+                    pattern.color.to_string(),
+                    pattern.edit_distance.to_string(),
+                    pattern.comment.to_string(),
+                ])
+                .expect("Error writing pattern CSV file record");
+        });
+        if writer.flush().is_err() {
+            return Some(String::from("Error flushing pattern CSV file"));
+        }
+        None
+        }
     }
 
     pub fn scroll(&mut self, num: isize, tui_rect: Rect) {
@@ -248,14 +287,6 @@ impl App<'_> {
         self.scroll_status = (0, 0);
         self.update();
     }
-
-    // pub fn focus_search_panel(&mut self, focus: SearchPanelFocus) {
-    //     self.highligh_search_panel_focus(focus);
-    //     self.mode = UIMode::SearchPanel(SearchPanelState {
-    //         focus,
-    //         patterns_list_selection: self.mode.get_search_panel_state().patterns_list_selection,
-    //     });
-    // }
 
     pub fn cycle_patterns_list(&mut self, reverse: bool) {
         self.search_panel.cycle_patterns_list(reverse);

@@ -26,7 +26,7 @@ Options:
           Must have the following header:
           pattern,color,editdistance,comment
   -s, --save-patterns <SAVE_PATTERNS_PATH>
-          Save the search panel to a CSV file before quitting. To be moved to the search panel GUI in the future
+          Save the search panel to a CSV file before quitting. To be removed in the future since you can now hit Ctrl-S in the search panel to save the patterns
   -h, --help
           Print help
   -V, --version

@@ -1,5 +1,6 @@
 use crate::app::{App, UIMode};
 
+
 use ratatui::{
     prelude::{Color, Constraint, Direction, Frame, Layout, Line, Rect, Span, Style},
     widgets::{
@@ -34,10 +35,15 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .scroll((app.scroll_status.1 as u16, 0)),
         frame.size(),
     );
-    if let UIMode::SearchPanel = app.mode {
+    if let UIMode::SearchPanel(save_file_popup) = app.mode {
         let center_area = centered_rect(80, 80, frame.size());
         frame.render_widget(Clear, center_area);
         frame.render_widget(&app.search_panel, center_area);
+        if save_file_popup {
+            let save_file_popup_area = centered_rect(80, 5, frame.size());
+            frame.render_widget(Clear, save_file_popup_area);
+            frame.render_widget(app.search_panel.file_save_popup_widget() , save_file_popup_area);
+        }
     }
 }
 

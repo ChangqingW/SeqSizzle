@@ -1,6 +1,8 @@
 use crate::app::SearchPattern;
 use crossterm::event::KeyEvent;
+use ratatui::layout::Alignment;
 use ratatui::prelude::{Buffer, Constraint, Direction, Layout, Line, Modifier, Rect, Span, Style};
+use ratatui::widgets::block::title::{Position, Title};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, StatefulWidget, Widget};
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -237,6 +239,7 @@ pub struct SearchPanel<'a> {
     elements: BTreeMap<PanelElementName, PanelElement<'a>>,
     focused_element: PanelElementName, // must have a focused element
     layout: fn(Rect) -> Rc<[Rect]>,
+    file_save_popup: TextArea<'a>,
 }
 
 impl<'a> SearchPanel<'a> {
@@ -335,10 +338,23 @@ impl<'a> SearchPanel<'a> {
             );
         }
 
+        let mut file_save_popup = TextArea::default();
+        file_save_popup.set_block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Save patterns as CSV to ...")
+                .title(
+                    Title::from("Esc to cancel; Enter to save")
+                        .position(Position::Bottom)
+                        .alignment(Alignment::Right),
+                ),
+        );
+
         Self {
             elements,
             focused_element: PanelElementName::PatternsList,
             layout,
+            file_save_popup,
         }
     }
 
@@ -410,6 +426,20 @@ impl<'a> SearchPanel<'a> {
             // keep list operations in main.rs
             _ => panic!("Wrong type of element"),
         }
+    }
+
+    pub fn file_popup_input(&mut self, keyevent: KeyEvent) {
+        self.file_save_popup.input(keyevent);
+    }
+
+    /// return the lines from the file save popup
+    pub fn file_save_popup_lines(&self) -> &[String] {
+        self.file_save_popup.lines()
+    }
+
+    /// Re-export widget method for rendering the file save popup
+    pub fn file_save_popup_widget(&self) -> impl Widget + '_ {
+        self.file_save_popup.widget()
     }
 }
 

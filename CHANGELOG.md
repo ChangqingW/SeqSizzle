@@ -2,6 +2,9 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.1.2]
+ * added save pattern as CSV dialog box
+
 ## [0.1.1]
  * With exact match, discard surrounding fuzzy match.  
  * added comments field

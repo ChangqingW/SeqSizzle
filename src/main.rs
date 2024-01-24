@@ -48,9 +48,9 @@ struct Args {
     #[clap(short = 'p', long = "patterns", verbatim_doc_comment)]
     patterns_path: Option<PathBuf>,
 
-    // TODO: move to SearchPanel
     /// Save the search panel to a CSV file before quitting.
-    /// To be moved to the search panel GUI in the future.
+    /// To be removed in the future since you can now hit
+    /// Ctrl-S in the search panel to save the patterns.
     #[clap(short = 's', long = "save-patterns")]
     save_patterns_path: Option<PathBuf>,
 }
@@ -169,6 +169,20 @@ fn main() -> Result<()> {
             },
             Update::Msg(msg) => app.set_message(msg),
             Update::CycleSearchPattern(reverse) => app.cycle_patterns_list(reverse),
+            Update::SaveFilePopupInput(input) => {
+                app.search_panel.file_popup_input(input);
+            }
+            Update::ToggleFilePopup => {
+                match app.mode {
+                    app::UIMode::SearchPanel(false) => {
+                        app.mode = app::UIMode::SearchPanel(true);
+                    }
+                    app::UIMode::SearchPanel(true) => {
+                        app.mode = app::UIMode::SearchPanel(false);
+                    }
+                    _ => panic!("ToggleFilePopup called in non-search panel mode"),
+                }
+            }
         };
 
         // Render the user interface.

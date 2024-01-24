@@ -8,6 +8,8 @@ use std::str::FromStr;
 pub enum Update {
     SearchPanelFocusNext(bool),
     SearchPanelInput(KeyEvent),
+    SaveFilePopupInput(KeyEvent),
+    ToggleFilePopup,
     EditSearchPattern(SearchPatternEdit),
     CycleSearchPattern(bool),
     ToggleUIMode,
@@ -37,10 +39,25 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
         }) => Update::ToggleUIMode,
         Event::Key(keyevent) => match app.mode {
             UIMode::Viewer => handle_input_viewer(app, tui, keyevent),
-            UIMode::SearchPanel => handle_input_search_panel(app, tui, keyevent),
+            UIMode::SearchPanel(false) => handle_input_search_panel(app, tui, keyevent),
+            UIMode::SearchPanel(true) => handle_input_file_save(app, tui, keyevent),
         },
         Event::Resize(_, _) => Update::WindowResize(tui.size()),
         _ => Update::None,
+    }
+}
+
+fn handle_input_file_save(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
+    if keyevent.code == KeyCode::Esc {
+        Update::ToggleFilePopup
+    } else if keyevent.code == KeyCode::Enter {
+        if let Some(msg) = app.save_patterns() {
+            Update::Msg(msg)
+        } else {
+            Update::ToggleFilePopup
+        }
+    } else {
+        Update::SaveFilePopupInput(keyevent)
     }
 }
 
@@ -108,6 +125,9 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
         && [KeyCode::Tab, KeyCode::BackTab].contains(&keyevent.code)
     {
         Update::SearchPanelFocusNext(keyevent.modifiers == KeyModifiers::SHIFT)
+
+    } else if keyevent.modifiers == KeyModifiers::CONTROL && keyevent.code == KeyCode::Char('s') {
+        Update::ToggleFilePopup
 
     // patterns list specific keybindings
     } else if app.search_panel.focused_element() == PanelElementName::PatternsList {
