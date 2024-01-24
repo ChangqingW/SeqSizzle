@@ -40,14 +40,10 @@ Up / down arrow (or `j` / `k`) to scroll by one line, `Ctrl+U` / `Ctrl+D` to sco
 
 ### search panel mode
 ![Search panel mode](./img/search_panel.png)
-Left / right arrow to cycle between different input fields, or `ALT+num` to jump to a specific field.  
-When on the patterns list field, up / down arrows cycle through patterns, `D` to delete the selected pattern and return to pop the pattern into the input fields for editing.  
-`ALT+5` to add current inputs into the search pattern list.  
+Left / right arrow (or Tab / Shift-Tab) to cycle through different input fields and the patterns list.  
+When on the patterns list field, up / down arrows cycle through patterns, `Backspace` (or `Delete`, `d`) to delete the selected pattern and `Return` to pop the pattern into the input fields for editing.  
+`Return` to add current inputs into the search pattern list (when focusing on any of the input boxes, rather than the patterns list).  
 Use **Shift +** arrow keys to move cursor within an input field (as arrow keys alone are bind to cycling input fields).  
-
-#### using `ALT` key on Mac
-You need to enable [Use Option as Meta key](https://support.apple.com/en-au/guide/terminal/trmlkbrd/mac) to send the meta modifier instead of alt code shortcuts (e.g. `¡` `™` `£` `¢` `∞` ...).  
-![Settings](./img/option_as_meta.png)
 
 # Roadmap
 ## functionality 

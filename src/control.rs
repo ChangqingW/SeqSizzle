@@ -103,6 +103,12 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
     {
         Update::SearchPanelFocusNext(keyevent.code == KeyCode::Left)
 
+    // Tab and S-Tab switch input focus regardless of current focus
+    } else if [KeyModifiers::NONE, KeyModifiers::SHIFT].contains(&keyevent.modifiers)
+        && [KeyCode::Tab, KeyCode::BackTab].contains(&keyevent.code)
+    {
+        Update::SearchPanelFocusNext(keyevent.modifiers == KeyModifiers::SHIFT)
+
     // patterns list specific keybindings
     } else if app.search_panel.focused_element() == PanelElementName::PatternsList {
         match keyevent {
@@ -131,6 +137,9 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
             PanelElement::TextAreaElement(ref textarea) => textarea.lines().join(""),
             _ => panic!("Wrong type of element"),
         };
+        if search_string.is_empty() {
+            return Update::Msg("Search pattern cannot be empty".to_string());
+        }
         let try_color = Color::from_str(
             match app.search_panel.elements()[&PanelElementName::InputColor] {
                 PanelElement::TextAreaElement(ref textarea) => textarea.lines().join(""),
