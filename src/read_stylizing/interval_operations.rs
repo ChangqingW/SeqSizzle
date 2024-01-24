@@ -1,6 +1,6 @@
 use gcollections::ops::set::{Intersection, Union};
-use gcollections::ops::{Difference, Empty};
-use interval::interval_set::{IntervalSet, ToIntervalSet};
+use gcollections::ops::{Empty};
+use interval::interval_set::{IntervalSet};
 use interval::ops::Width;
 
 pub fn find_intersections<Bound: Width + num_traits::Num>(

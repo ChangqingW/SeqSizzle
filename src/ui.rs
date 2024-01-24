@@ -1,24 +1,25 @@
 use crate::app::{App, UIMode};
-use crate::search_panel::SearchPanel;
+
 use ratatui::{
-    prelude::{Buffer, Color, Constraint, Direction, Frame, Layout, Line, Rect, Span, Style},
+    prelude::{Color, Constraint, Direction, Frame, Layout, Line, Rect, Span, Style},
     widgets::{
         block::title::{Position, Title},
-        Block, Borders, Clear, ListState, Paragraph, StatefulWidget, Widget, Wrap,
+        Block, Borders, Clear, Paragraph, Wrap,
     },
 };
 
 pub fn render(app: &mut App, frame: &mut Frame) {
     let viewer_block = match app.get_message() {
         Some(msg) => Block::default()
-                .borders(Borders::ALL)
-                .title(app.file.to_str().unwrap_or("SeqSizzle"))
-                .title(Title::from(Span::styled(msg, Style::default().fg(Color::Red)))
-                .position(Position::Bottom))
-            ,
+            .borders(Borders::ALL)
+            .title(app.file.to_str().unwrap_or("SeqSizzle"))
+            .title(
+                Title::from(Span::styled(msg, Style::default().fg(Color::Red)))
+                    .position(Position::Bottom),
+            ),
         None => Block::default()
-                .borders(Borders::ALL)
-                .title(app.file.to_str().unwrap_or("SeqSizzle"))
+            .borders(Borders::ALL)
+            .title(app.file.to_str().unwrap_or("SeqSizzle")),
     };
 
     frame.render_widget(

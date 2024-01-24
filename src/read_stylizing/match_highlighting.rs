@@ -1,4 +1,4 @@
-use ratatui::prelude::{Color, Line, Span, Style, Stylize};
+use ratatui::prelude::{Color, Line, Span, Style};
 
 use crate::read_stylizing::interval_operations::find_intersections;
 use gcollections::ops::Bounded;

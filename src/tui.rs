@@ -50,8 +50,7 @@ impl Tui {
         if app.rendered_lines.is_empty() {
             panic!("No lines in app.line_buf!\n{:?}", app)
         }
-        self.terminal
-            .draw(|frame| render(app, frame))?;
+        self.terminal.draw(|frame| render(app, frame))?;
         Ok(())
     }
 

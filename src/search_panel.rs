@@ -2,12 +2,11 @@ use crate::app::SearchPattern;
 use crossterm::event::KeyEvent;
 use once_cell::sync::Lazy;
 use ratatui::prelude::{
-    Alignment, Buffer, Color, Constraint, Direction, Layout, Line, Modifier, Rect, Span, Style,
+    Buffer, Constraint, Direction, Layout, Line, Modifier, Rect, Span, Style,
     Stylize,
 };
 use ratatui::widgets::{
-    block::title::{Position, Title},
-    Block, Borders, Clear, List, ListItem, ListState, Paragraph, StatefulWidget, Widget, Wrap,
+    Block, Borders, List, ListItem, ListState, StatefulWidget, Widget,
 };
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -44,7 +43,7 @@ fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
 
 /// List plus a state field
 #[derive(Debug, Clone)]
-struct StatefulList<'a> {
+pub struct StatefulList<'a> {
     state: ListState,
     list: List<'a>,
 }
@@ -231,16 +230,6 @@ impl PanelElementName {
             PanelElementName::InputComment => "Comment (optional)",
         }
     }
-
-    fn all_values() -> [PanelElementName; 5] {
-        [
-            PanelElementName::PatternsList,
-            PanelElementName::InputPattern,
-            PanelElementName::InputColor,
-            PanelElementName::InputDistance,
-            PanelElementName::InputComment,
-        ]
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -396,7 +385,7 @@ impl<'a> SearchPanel<'a> {
                             .insert_str(pattern.edit_distance.to_string());
                     }
                     PanelElementName::InputComment => {
-                            textarea.element.insert_str(pattern.comment.clone());
+                        textarea.element.insert_str(pattern.comment.clone());
                     }
                     _ => (),
                 },

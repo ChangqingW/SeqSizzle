@@ -192,10 +192,12 @@ impl FastqReader<File> {
     pub fn from_path(path: &Path) -> Self {
         Self::new(match File::open(path) {
             Ok(mut file) => {
-                assert!(file.seek(std::io::SeekFrom::Current(0)).is_ok(),
-                "File not seekable, are you using a pipe? Consider saving to an actual file");
+                assert!(
+                    file.seek(std::io::SeekFrom::Current(0)).is_ok(),
+                    "File not seekable, are you using a pipe? Consider saving to an actual file"
+                );
                 file
-            },
+            }
             Err(e) => panic!("Error opening file '{}': {:?}", path.to_string_lossy(), e),
         })
     }
@@ -211,7 +213,7 @@ impl<R: Read + Seek> FastqReader<R> {
         let mut ret = Self {
             buf_reader: BufReader::with_capacity(READER_BUF_SIZE, reader),
             records_buffer: VecDeque::with_capacity(RECORD_BUF_SIZE + 1),
-            offset: 0,    
+            offset: 0,
             total_records: None,
         };
         ret.fill_buffer().unwrap();
@@ -266,8 +268,7 @@ impl<R: Read + Seek> FastqReader<R> {
             return Ok(Some(self.records_buffer[index - self.offset].clone()));
         } else if index >= self.offset + self.records_buffer.len() {
             // forward the buffer
-            for _ in 0..(index - self.offset - self.records_buffer.len() + RECORD_BUF_SIZE / 4)
-            {
+            for _ in 0..(index - self.offset - self.records_buffer.len() + RECORD_BUF_SIZE / 4) {
                 match next(&mut self.buf_reader)? {
                     Some(res) => {
                         self.records_buffer.push_back(res);

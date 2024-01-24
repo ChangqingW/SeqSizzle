@@ -3,19 +3,19 @@ pub mod control;
 pub mod event;
 pub mod io;
 pub mod read_stylizing;
-pub mod tui;
 pub mod search_panel;
+pub mod tui;
 mod ui;
 
 use crate::control::{handle_input, SearchPatternEdit, Update};
 use anyhow::Result;
 use app::{App, SearchPattern};
+use clap::Parser;
 use event::{Event, EventHandler};
-use ratatui::prelude::{CrosstermBackend, Terminal, Color};
+use ratatui::prelude::{Color, CrosstermBackend, Terminal};
+use shadow_rs::shadow;
 use std::path::PathBuf;
 use tui::Tui;
-use clap::Parser;
-use shadow_rs::shadow;
 
 shadow!(build);
 
@@ -26,7 +26,7 @@ shadow!(build);
 struct Args {
     /// The FASTQ file to view
     file: PathBuf,
-    
+
     /// Start with 10x 3' kit adaptors:
     ///  - Patrial Read1: CTACACGACGCTCTTCCGATCT (and reverse complement)
     ///  - Partial TSO: AGATCGGAAGAGCGTCGTGTAG (and reverse complement)
@@ -42,23 +42,25 @@ struct Args {
     #[clap(long, verbatim_doc_comment)]
     adapter_5p: bool,
 
-    /// Start with patterns from a CSV file 
-    /// Must have the following header: 
+    /// Start with patterns from a CSV file
+    /// Must have the following header:
     /// pattern,color,editdistance,comment
     #[clap(short = 'p', long = "patterns", verbatim_doc_comment)]
     patterns_path: Option<PathBuf>,
 
     // TODO: move to SearchPanel
-    /// Save the search panel to a CSV file before quitting. 
+    /// Save the search panel to a CSV file before quitting.
     /// To be moved to the search panel GUI in the future.
     #[clap(short = 's', long = "save-patterns")]
     save_patterns_path: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
-
     if !shadow_rs::git_clean() {
-        print!("Warning: built with dirty repo:\n{}", shadow_rs::git_status_file());
+        print!(
+            "Warning: built with dirty repo:\n{}",
+            shadow_rs::git_status_file()
+        );
     }
 
     let args = Args::parse();
@@ -92,19 +94,31 @@ fn main() -> Result<()> {
     if let Some(path) = args.patterns_path {
         let err_str = "Error opening provided pattern CSV file";
         let mut reader = csv::Reader::from_path(path).expect(err_str);
-        assert_eq!(reader.headers().expect("Error reading pattern CSV file headers").clone(),
-                   csv::StringRecord::from(vec!["pattern", "color", "editdistance", "comment"]),
-                   "Pattern CSV file headers must be: pattern,color,editdistance,comment");
+        assert_eq!(
+            reader
+                .headers()
+                .expect("Error reading pattern CSV file headers")
+                .clone(),
+            csv::StringRecord::from(vec!["pattern", "color", "editdistance", "comment"]),
+            "Pattern CSV file headers must be: pattern,color,editdistance,comment"
+        );
         reader.records().for_each(|record| {
-            
             let record = record.expect(err_str);
             let color = record.get(1).expect(err_str);
             let editdistance = record.get(2).expect(err_str);
             let comment = record.get(3).expect(err_str).parse::<String>().unwrap();
             let pattern = SearchPattern::new(
                 record.get(0).expect(err_str).to_string(),
-                color.parse::<Color>().expect(format!("Error parsing pattern CSV file record color: {}", color).as_str()),
-                editdistance.parse::<u8>().expect(format!("Error parsing pattern CSV file record editdistance: {}", editdistance).as_str()),
+                color.parse::<Color>().expect(
+                    format!("Error parsing pattern CSV file record color: {}", color).as_str(),
+                ),
+                editdistance.parse::<u8>().expect(
+                    format!(
+                        "Error parsing pattern CSV file record editdistance: {}",
+                        editdistance
+                    )
+                    .as_str(),
+                ),
                 comment.as_str(),
             );
             patterns.push(pattern);
@@ -112,7 +126,6 @@ fn main() -> Result<()> {
     }
 
     let mut app = App::new(&args.file, patterns);
-
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());
@@ -148,11 +161,11 @@ fn main() -> Result<()> {
             Update::EditSearchPattern(edit) => match edit {
                 SearchPatternEdit::Append(x) => app.append_search_pattern(x),
                 SearchPatternEdit::Delete(index, pop) => {
-                    if pop { 
+                    if pop {
                         // pop current pattern into edit boxs
                         app.edit_search_pattern(index);
                         // focus on pattern edit box
-                        app.search_panel.focus_next(false); 
+                        app.search_panel.focus_next(false);
                     } else {
                         app.delete_search_pattern(index);
                     }
@@ -169,19 +182,22 @@ fn main() -> Result<()> {
     // Save the search panel to a CSV file
     if args.save_patterns_path.is_some() {
         let mut writer = csv::Writer::from_path(args.save_patterns_path.unwrap())?;
-        writer.write_record(&["pattern", "color", "editdistance", "comment"]).expect("Error writing pattern CSV file headers");
-        app.search_patterns.iter()
-            .for_each(|pattern| {
-                writer.write_record(&[
+        writer
+            .write_record(&["pattern", "color", "editdistance", "comment"])
+            .expect("Error writing pattern CSV file headers");
+        app.search_patterns.iter().for_each(|pattern| {
+            writer
+                .write_record(&[
                     pattern.search_string.clone(),
                     pattern.color.to_string(),
                     pattern.edit_distance.to_string(),
                     pattern.comment.to_string(),
-                ]).expect("Error writing pattern CSV file record");
-            });
+                ])
+                .expect("Error writing pattern CSV file record");
+        });
         writer.flush()?;
     }
-    
+
     // Exit the user interface.
     tui.exit()?;
     Ok(())

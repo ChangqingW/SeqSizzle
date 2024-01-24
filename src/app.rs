@@ -6,16 +6,13 @@ use bio::io::fastq;
 use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
-use ratatui::prelude::{Alignment, Color, Line, Modifier, Rect, Span, Style, Stylize};
-use ratatui::widgets::{
-    block::title::{Position, Title},
-    Block, Borders, List, ListItem, Paragraph, Wrap,
-};
+use ratatui::prelude::{Color, Line, Rect};
+
 use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use tui_textarea::{CursorMove, TextArea};
+
 
 #[cfg(debug_assertions)]
 const RENDER_BUF_SIZE: usize = 24;
@@ -34,7 +31,6 @@ pub struct App<'a> {
     // scroll within the viewed lines -- reset to 0 on resize
     pub scroll_status: (usize, usize),
     reader: FastqReader<File>,
-    active_boarder_style: Style,
     message: TransientMessage,
 }
 
@@ -46,12 +42,7 @@ pub struct SearchPattern {
     pub comment: String,
 }
 impl SearchPattern {
-    pub fn new(
-        search_string: String,
-        color: Color,
-        edit_distance: u8,
-        comment: &str,
-    ) -> Self {
+    pub fn new(search_string: String, color: Color, edit_distance: u8, comment: &str) -> Self {
         Self {
             search_string,
             color,
@@ -106,7 +97,6 @@ impl App<'_> {
             search_panel: SearchPanel::new(&search_patterns),
             file: Path::new(&file).to_path_buf(),
             reader,
-            active_boarder_style: Style::new().red().bold(),
             rendered_lines: VecDeque::with_capacity(2 * (RENDER_BUF_SIZE + 1)),
             scroll_status: (0, 0),
         };
@@ -372,7 +362,8 @@ impl App<'_> {
         }
 
         let mut myers: Myers<T> = builder.build(pattern.search_string.clone().into_bytes());
-        let mut matches = myers.find_all(record.seq(), pattern.edit_distance.into())
+        let mut matches = myers
+            .find_all(record.seq(), pattern.edit_distance.into())
             .map(|(start, end, dist)| (start, end - 1, dist))
             .collect::<Vec<(usize, usize, <T as BitVec>::DistType)>>();
         matches.sort_by_key(|(_, _, dist)| *dist);
@@ -382,7 +373,7 @@ impl App<'_> {
         for m in matches {
             if filtered_matches
                 .iter()
-                .all(|(start, end, dist)| *dist == m.2 ||  m.0 > *end || m.1 < *start)
+                .all(|(start, end, dist)| *dist == m.2 || m.0 > *end || m.1 < *start)
             {
                 filtered_matches.push(m);
             }
