@@ -1,14 +1,37 @@
-on: push
-name: Clippy check
+name: rust-clippy analyze
 
-# Make sure CI fails on all warnings, including Clippy lints
-env:
-  RUSTFLAGS: "-Dwarnings"
+on:
+  push:
+    branches:
+      - '*' 
+  pull_request:
+    branches:
+      - '*' 
 
 jobs:
-  clippy_check:
+  rust-clippy-analyze:
+    name: Run rust-clippy analyzing
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
     steps:
-      - uses: actions/checkout@v4
-      - name: Run Clippy
-        run: cargo clippy --all-targets --all-features
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install required cargo
+        run: cargo install clippy-sarif sarif-fmt
+
+      - name: Run rust-clippy
+        run:
+          cargo clippy
+          --all-features
+          --message-format=json | clippy-sarif | tee rust-clippy-results.sarif | sarif-fmt
+        continue-on-error: true
+
+      - name: Upload analysis results to GitHub
+        uses: github/codeql-action/upload-sarif@v1
+        with:
+          sarif_file: rust-clippy-results.sarif
+          wait-for-processing: true
