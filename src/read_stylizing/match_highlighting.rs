@@ -43,7 +43,7 @@ where
                 (
                     interval.lower().into(),
                     interval.upper().into(),
-                    color.clone(),
+                    color,
                 )
             })
         })

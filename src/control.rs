@@ -86,7 +86,7 @@ pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
                 ..
             }) = next
             {
-                return Update::ScrollViewer(isize::MIN + 1); // negating isize::MIN cause overflow
+                Update::ScrollViewer(isize::MIN + 1)// negating isize::MIN cause overflow
             } else {
                 Update::None
             }
@@ -99,7 +99,7 @@ pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
 pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
     // arrow keys switch input focus regardless of current focus
     if keyevent.modifiers == KeyModifiers::NONE
-        && vec![KeyCode::Right, KeyCode::Left].contains(&keyevent.code)
+        && [KeyCode::Right, KeyCode::Left].contains(&keyevent.code)
     {
         Update::SearchPanelFocusNext(keyevent.code == KeyCode::Left)
 

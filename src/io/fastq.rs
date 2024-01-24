@@ -22,6 +22,7 @@ fn parse_record<R: Read>(
     let mut seq = String::new();
     let mut qual = String::new();
 
+    #[allow(clippy::type_complexity)]
     let status: (
         Result<usize, std::io::Error>,
         Result<usize, std::io::Error>,
@@ -41,8 +42,8 @@ fn parse_record<R: Read>(
                 Ok(Some(fastq::Record::with_attrs(
                     &id.trim_end()[1..],
                     None,
-                    &seq.trim_end().as_bytes(),
-                    &qual.trim_end().as_bytes(),
+                    seq.trim_end().as_bytes(),
+                    qual.trim_end().as_bytes(),
                 )))
             } else {
                 Err(std::io::Error::new(
@@ -103,8 +104,8 @@ fn next<R: Read + Seek>(
     buf_reader: &mut BufReader<R>,
 ) -> Result<Option<fastq::Record>, std::io::Error> {
     let rec: Option<fastq::Record> = parse_record(buf_reader)?;
-    if rec.is_some() {
-        Ok(Some(rec.unwrap()))
+    if let Some(rec) = rec {
+        Ok(Some(rec))
     } else {
         Ok(None)
     }
@@ -122,18 +123,22 @@ fn read_to_pos<R: Read + Seek>(
         match res {
             Some(rec) => {
                 let current_pos = buf_reader.stream_position()?;
-                if current_pos == pos {
-                    buff.push_back(rec);
-                    break;
-                } else if current_pos > pos {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "read_to_pos exceeded given pos",
-                    ));
-                } else {
-                    buff.push_back(rec);
-                    if buff.len() >= RECORD_BUF_SIZE {
-                        buff.pop_front();
+                match current_pos.cmp(&pos) {
+                    std::cmp::Ordering::Equal => {
+                        buff.push_back(rec);
+                        break;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "read_to_pos exceeded given pos",
+                        ));
+                    }
+                    std::cmp::Ordering::Less => {
+                        buff.push_back(rec);
+                        if buff.len() >= RECORD_BUF_SIZE {
+                            buff.pop_front();
+                        }
                     }
                 }
             }
@@ -193,7 +198,7 @@ impl FastqReader<File> {
         Self::new(match File::open(path) {
             Ok(mut file) => {
                 assert!(
-                    file.seek(std::io::SeekFrom::Current(0)).is_ok(),
+                    file.stream_position().is_ok(),
                     "File not seekable, are you using a pipe? Consider saving to an actual file"
                 );
                 file
@@ -265,7 +270,7 @@ impl<R: Read + Seek> FastqReader<R> {
             return Ok(None);
         }
         if index >= self.offset && index < self.offset + self.records_buffer.len() {
-            return Ok(Some(self.records_buffer[index - self.offset].clone()));
+            Ok(Some(self.records_buffer[index - self.offset].clone()))
         } else if index >= self.offset + self.records_buffer.len() {
             // forward the buffer
             for _ in 0..(index - self.offset - self.records_buffer.len() + RECORD_BUF_SIZE / 4) {

@@ -109,16 +109,9 @@ fn main() -> Result<()> {
             let comment = record.get(3).expect(err_str).parse::<String>().unwrap();
             let pattern = SearchPattern::new(
                 record.get(0).expect(err_str).to_string(),
-                color.parse::<Color>().expect(
-                    format!("Error parsing pattern CSV file record color: {}", color).as_str(),
-                ),
-                editdistance.parse::<u8>().expect(
-                    format!(
-                        "Error parsing pattern CSV file record editdistance: {}",
-                        editdistance
-                    )
-                    .as_str(),
-                ),
+                color.parse::<Color>().unwrap_or_else(|_| panic!("Error parsing pattern CSV file record color: {}", color)),
+                editdistance.parse::<u8>().unwrap_or_else(|_| panic!("Error parsing pattern CSV file record editdistance: {}",
+                        editdistance)),
                 comment.as_str(),
             );
             patterns.push(pattern);
@@ -183,7 +176,7 @@ fn main() -> Result<()> {
     if args.save_patterns_path.is_some() {
         let mut writer = csv::Writer::from_path(args.save_patterns_path.unwrap())?;
         writer
-            .write_record(&["pattern", "color", "editdistance", "comment"])
+            .write_record(["pattern", "color", "editdistance", "comment"])
             .expect("Error writing pattern CSV file headers");
         app.search_patterns.iter().for_each(|pattern| {
             writer

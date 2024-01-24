@@ -58,20 +58,15 @@ pub enum UIMode {
     SearchPanel,
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct TransientMessage {
     message: String,
     timer: u8, // ticks to live
 }
+
 impl TransientMessage {
     pub fn new(message: String) -> Self {
         Self { message, timer: 1 }
-    }
-    pub fn default() -> Self {
-        Self {
-            message: String::new(),
-            timer: 0,
-        }
     }
     pub fn get(&mut self) -> Option<String> {
         if self.timer > 0 {
@@ -125,7 +120,7 @@ impl App<'_> {
         let pattern = self.search_patterns.remove(index);
         self.search_panel.update(&self.search_patterns);
         self.update();
-        return pattern;
+        pattern
     }
 
     pub fn edit_search_pattern(&mut self, index: usize) {
@@ -146,7 +141,7 @@ impl App<'_> {
 
         // line height in tui
         fn line_height(line: &Line, tui_rect: Rect) -> usize {
-            return line.width().div_ceil(tui_rect.width as usize - 2); // 2 boarders 1 char wide
+            line.width().div_ceil(tui_rect.width as usize - 2)// 2 boarders 1 char wide
         }
         fn lines_height_vec(lines: &[Line], tui_rect: Rect) -> usize {
             return lines.iter().map(|x| line_height(x, tui_rect)).sum();
@@ -204,7 +199,7 @@ impl App<'_> {
         } else if num > 0 {
             let mut remaining: isize = num + self.scroll_status.1 as isize; // remaining lines to scroll
             let mut current_line_height =
-                lines_height_vecdeque(&self.rendered_lines, &vec![0, 1], tui_rect);
+                lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_rect);
             self.scroll_status.1 = 0;
 
             while remaining >= current_line_height as isize {
@@ -217,7 +212,7 @@ impl App<'_> {
                     let max_scroll = 3 + self
                         .rendered_lines // 2 x boarders 1 char high, plus 1 empty line to indicate EOF
                         .iter()
-                        .map(|x| line_height(&x, tui_rect))
+                        .map(|x| line_height(x, tui_rect))
                         .sum::<usize>()
                         .saturating_sub(tui_rect.height as usize);
                     self.scroll_status.1 =
@@ -240,7 +235,7 @@ impl App<'_> {
                     .for_each(|x| self.rendered_lines.push_back(x));
                 remaining -= current_line_height as isize;
                 current_line_height =
-                    lines_height_vecdeque(&self.rendered_lines, &vec![0, 1], tui_rect);
+                    lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_rect);
             }
             self.scroll_status.1 = remaining as usize;
             return;

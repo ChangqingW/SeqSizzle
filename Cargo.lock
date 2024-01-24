@@ -14,7 +14,6 @@ dependencies = [
  "gcollections",
  "intervallum",
  "num-traits",
- "once_cell",
  "ratatui",
  "rayon",
  "shadow-rs",

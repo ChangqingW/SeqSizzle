@@ -1,6 +1,8 @@
 use gcollections::ops::set::{Intersection, Union};
-use gcollections::ops::{Empty};
-use interval::interval_set::{IntervalSet};
+#[allow(unused_imports)]
+use gcollections::ops::{Empty, Difference};
+#[allow(unused_imports)]
+use interval::interval_set::{IntervalSet, ToIntervalSet};
 use interval::ops::Width;
 
 pub fn find_intersections<Bound: Width + num_traits::Num>(
@@ -8,7 +10,7 @@ pub fn find_intersections<Bound: Width + num_traits::Num>(
 ) -> IntervalSet<Bound> {
     sets.iter()
         .enumerate()
-        .flat_map(|(i, &ref x)| sets.iter().skip(i + 1).map(move |y| (x.clone(), y.clone())))
+        .flat_map(|(i, x)| sets.iter().skip(i + 1).map(move |y| (x.clone(), y.clone())))
         .fold(IntervalSet::empty(), |acc, (j, k)| {
             acc.union(&j.intersection(&k))
         })

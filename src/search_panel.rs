@@ -1,18 +1,18 @@
 use crate::app::SearchPattern;
 use crossterm::event::KeyEvent;
-use once_cell::sync::Lazy;
-use ratatui::prelude::{
-    Buffer, Constraint, Direction, Layout, Line, Modifier, Rect, Span, Style,
-    Stylize,
-};
-use ratatui::widgets::{
-    Block, Borders, List, ListItem, ListState, StatefulWidget, Widget,
-};
+use ratatui::prelude::{Buffer, Constraint, Direction, Layout, Line, Modifier, Rect, Span, Style};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, StatefulWidget, Widget};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use tui_textarea::{CursorMove, TextArea};
 
-const ACTIVE_BOARDER_STYLE: Lazy<Style> = Lazy::new(|| Style::new().red().bold());
+const ACTIVE_BOARDER_STYLE: Style = Style {
+    fg: Some(ratatui::prelude::Color::Red),
+    bg: None,
+    underline_color: None,
+    add_modifier: ratatui::style::Modifier::BOLD,
+    sub_modifier: ratatui::style::Modifier::BOLD,
+};
 
 fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
     List::new(
@@ -61,12 +61,12 @@ impl<'a> StatefulList<'a> {
     /// Update with a vector of SearchPattern, keeping the selected element if possible
     fn update(&mut self, search_patterns: &[SearchPattern]) {
         self.list = search_patterns_to_list(search_patterns);
-        if search_patterns.len() > 0
+        if !search_patterns.is_empty()
             && self.state.selected().is_some()
             && self.state.selected().unwrap() >= search_patterns.len()
         {
             self.state.select(Some(search_patterns.len() - 1));
-        } else if search_patterns.len() == 0 {
+        } else if search_patterns.is_empty() {
             self.state.select(None);
         }
     }
@@ -301,7 +301,7 @@ impl<'a> SearchPanel<'a> {
             StatefulList::from_search_patterns(search_patterns),
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(*ACTIVE_BOARDER_STYLE)
+                .border_style(ACTIVE_BOARDER_STYLE)
                 .title("Search patterns"),
         ));
 
@@ -329,7 +329,7 @@ impl<'a> SearchPanel<'a> {
                     },
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(*ACTIVE_BOARDER_STYLE)
+                        .border_style(ACTIVE_BOARDER_STYLE)
                         .title(element.title()),
                 )),
             );
@@ -356,12 +356,11 @@ impl<'a> SearchPanel<'a> {
 
     /// Clear all TextArea elements' inptus
     pub fn clear_inputs(&mut self) {
-        self.elements
-            .values_mut()
-            .for_each(|element| match element {
-                PanelElement::TextAreaElement(textarea) => textarea.clear(),
-                _ => (),
-            });
+        self.elements.values_mut().for_each(|element| {
+            if let PanelElement::TextAreaElement(textarea) = element {
+                textarea.clear()
+            }
+        });
     }
 
     /// Instert the given pattern to the input fields
@@ -371,8 +370,8 @@ impl<'a> SearchPanel<'a> {
 
         // insert values
         for (element_name, element) in self.elements.iter_mut() {
-            match element {
-                PanelElement::TextAreaElement(textarea) => match element_name {
+            if let PanelElement::TextAreaElement(textarea) = element {
+                match element_name {
                     PanelElementName::InputPattern => {
                         textarea.element.insert_str(pattern.search_string.clone());
                     }
@@ -388,19 +387,15 @@ impl<'a> SearchPanel<'a> {
                         textarea.element.insert_str(pattern.comment.clone());
                     }
                     _ => (),
-                },
-                _ => (),
+                }
             }
         }
 
         // move cursor to end
         for element in self.elements.values_mut() {
-            match element {
-                PanelElement::TextAreaElement(textarea) => {
-                    textarea.element.move_cursor(CursorMove::Bottom);
-                    textarea.element.move_cursor(CursorMove::End);
-                }
-                _ => (),
+            if let PanelElement::TextAreaElement(textarea) = element {
+                textarea.element.move_cursor(CursorMove::Bottom);
+                textarea.element.move_cursor(CursorMove::End);
             }
         }
     }
