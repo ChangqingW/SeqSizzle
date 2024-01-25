@@ -26,7 +26,9 @@ Options:
           Must have the following header:
           pattern,color,editdistance,comment
   -s, --save-patterns <SAVE_PATTERNS_PATH>
-          Save the search panel to a CSV file before quitting. To be removed in the future since you can now hit Ctrl-S in the search panel to save the patterns
+          Save the search panel to a CSV file before quitting. 
+          To be removed in the future since you can now hit Ctrl-S in 
+          the search panel to save the patterns
   -h, --help
           Print help
   -V, --version
@@ -36,7 +38,7 @@ Options:
 ### Viewer mode
 ![Viewer mode](./img/viewer_mode.png)
 Up / down arrow (or `j` / `k`) to scroll by one line, `Ctrl+U` / `Ctrl+D` to scoll half a screen.  
-`/` to toggle search panel, `q` to quit
+`/` (or `Ctrl+F`) to toggle search panel, `q` to quit
 
 ### search panel mode
 ![Search panel mode](./img/search_panel.png)
@@ -44,6 +46,7 @@ Left / right arrow (or Tab / Shift-Tab) to cycle through different input fields 
 When on the patterns list field, up / down arrows cycle through patterns, `Backspace` (or `Delete`, `d`) to delete the selected pattern and `Return` to pop the pattern into the input fields for editing.  
 `Return` to add current inputs into the search pattern list (when focusing on any of the input boxes, rather than the patterns list).  
 Use **Shift +** arrow keys to move cursor within an input field (as arrow keys alone are bind to cycling input fields).  
+`/` or `Esc` to close the search panel.
 
 # Roadmap
 ## functionality 

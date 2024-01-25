@@ -37,6 +37,11 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
             modifiers: KeyModifiers::NONE,
             ..
         }) => Update::ToggleUIMode,
+        Event::Key(KeyEvent { 
+            code: KeyCode::Char('f'),
+            modifiers: KeyModifiers::CONTROL,
+            .. 
+        }) => Update::ToggleUIMode,
         Event::Key(keyevent) => match app.mode {
             UIMode::Viewer => handle_input_viewer(app, tui, keyevent),
             UIMode::SearchPanel(false) => handle_input_search_panel(app, tui, keyevent),
@@ -88,6 +93,8 @@ pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
             modifiers: KeyModifiers::CONTROL,
             ..
         } => Update::ScrollViewer(-(tui.size().height as f32 * 0.4).floor() as isize),
+
+        // gg scrolls to top
         KeyEvent {
             code: KeyCode::Char('g'),
             modifiers: KeyModifiers::NONE,
@@ -107,15 +114,17 @@ pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
             } else {
                 Update::None
             }
-        }
-
+        },
         _ => Update::None,
     }
 }
 
 pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
+    if keyevent.code == KeyCode::Esc {
+        Update::ToggleUIMode
+
     // arrow keys switch input focus regardless of current focus
-    if keyevent.modifiers == KeyModifiers::NONE
+    } else if keyevent.modifiers == KeyModifiers::NONE
         && [KeyCode::Right, KeyCode::Left].contains(&keyevent.code)
     {
         Update::SearchPanelFocusNext(keyevent.code == KeyCode::Left)

@@ -437,6 +437,11 @@ impl<'a> SearchPanel<'a> {
         self.file_save_popup.lines()
     }
 
+    pub fn clear_file_save_popup(&mut self) {
+        self.file_save_popup.delete_line_by_end();
+        self.file_save_popup.delete_line_by_head();
+    }
+
     /// Re-export widget method for rendering the file save popup
     pub fn file_save_popup_widget(&self) -> impl Widget + '_ {
         self.file_save_popup.widget()

@@ -178,6 +178,7 @@ fn main() -> Result<()> {
                         app.mode = app::UIMode::SearchPanel(true);
                     }
                     app::UIMode::SearchPanel(true) => {
+                        app.search_panel.clear_file_save_popup();
                         app.mode = app::UIMode::SearchPanel(false);
                     }
                     _ => panic!("ToggleFilePopup called in non-search panel mode"),
