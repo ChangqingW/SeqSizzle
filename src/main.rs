@@ -5,11 +5,13 @@ pub mod io;
 pub mod read_stylizing;
 pub mod search_panel;
 pub mod tui;
+pub mod match_summarizing;
 mod ui;
 
 use crate::control::{handle_input, SearchPatternEdit, Update};
 use anyhow::Result;
 use app::{App, SearchPattern};
+use bio::io::fastq;
 use clap::Parser;
 use event::{Event, EventHandler};
 use ratatui::prelude::{Color, CrosstermBackend, Terminal};
@@ -65,6 +67,8 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    let fastqs: Vec<fastq::Record> = fastq::Reader::from_file(args.file.clone())?.records().collect::<Result<Vec<_>, _>>()?;
+
     // add patterns based on command line arguments
     let mut patterns: Vec<SearchPattern> = Vec::new();
     if args.adapter_3p {
@@ -73,8 +77,8 @@ fn main() -> Result<()> {
             SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3, "TSO"),
             SearchPattern::new("TGGTATCAACGCAGAGTACATGGG".to_string(), Color::Red, 3, "R1 rev"),
             SearchPattern::new("CCCATGTACTCTGCGTTGATACCA".to_string(), Color::Yellow, 3, "TSO rev"),
-            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 0, ""),
-            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 0, ""),
+            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 1, ""),
+            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 1, ""),
         ]);
     }
     if args.adapter_5p {
@@ -85,10 +89,13 @@ fn main() -> Result<()> {
             SearchPattern::new("CCCATATAAGAAA".to_string(), Color::Yellow, 2, "TSO rev"),
             SearchPattern::new("AGATCGGAAGAGCACACGTCTGAA".to_string(), Color::Cyan, 3, "R2"),
             SearchPattern::new("TTCAGACGTGTGCTCTTCCGATCT".to_string(), Color::Magenta, 3, "R2 rev"),
-            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 0, ""),
-            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 0, ""),
+            SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 1, ""),
+            SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 1, ""),
         ]);
     }
+
+   println!("{}", match_summarizing::fmt_summarised_reads(&match_summarizing::summarise_reads(&fastqs, &patterns)));
+   return Ok(());
 
     // add patterns from CSV file
     if let Some(path) = args.patterns_path {

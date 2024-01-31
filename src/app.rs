@@ -13,7 +13,6 @@ use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-
 #[cfg(debug_assertions)]
 const RENDER_BUF_SIZE: usize = 24;
 #[cfg(not(debug_assertions))]
@@ -34,7 +33,7 @@ pub struct App<'a> {
     message: TransientMessage,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct SearchPattern {
     pub search_string: String,
     pub color: Color,
@@ -138,13 +137,10 @@ impl App<'_> {
     pub fn save_patterns(&self) -> Option<String> {
         let path = self.search_panel.file_save_popup_lines();
         if path.len() != 1 {
-           return Some(String::from("Malformed file path"));
+            return Some(String::from("Malformed file path"));
         }
         let path = Path::new(&path[0]);
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path);
+        let file = OpenOptions::new().write(true).create_new(true).open(path);
         if let Err(e) = file {
             match e.kind() {
                 std::io::ErrorKind::NotFound => Some(String::from("File path not found")),
@@ -154,23 +150,23 @@ impl App<'_> {
             }
         } else {
             let mut writer = csv::Writer::from_writer(file.unwrap());
-        writer
-            .write_record(["pattern", "color", "editdistance", "comment"])
-            .expect("Error writing pattern CSV file headers");
-        self.search_patterns.iter().for_each(|pattern| {
             writer
-                .write_record(&[
-                    pattern.search_string.clone(),
-                    pattern.color.to_string(),
-                    pattern.edit_distance.to_string(),
-                    pattern.comment.to_string(),
-                ])
-                .expect("Error writing pattern CSV file record");
-        });
-        if writer.flush().is_err() {
-            return Some(String::from("Error flushing pattern CSV file"));
-        }
-        None
+                .write_record(["pattern", "color", "editdistance", "comment"])
+                .expect("Error writing pattern CSV file headers");
+            self.search_patterns.iter().for_each(|pattern| {
+                writer
+                    .write_record(&[
+                        pattern.search_string.clone(),
+                        pattern.color.to_string(),
+                        pattern.edit_distance.to_string(),
+                        pattern.comment.to_string(),
+                    ])
+                    .expect("Error writing pattern CSV file record");
+            });
+            if writer.flush().is_err() {
+                return Some(String::from("Error flushing pattern CSV file"));
+            }
+            None
         }
     }
 
@@ -180,7 +176,7 @@ impl App<'_> {
 
         // line height in tui
         fn line_height(line: &Line, tui_rect: Rect) -> usize {
-            line.width().div_ceil(tui_rect.width as usize - 2)// 2 boarders 1 char wide
+            line.width().div_ceil(tui_rect.width as usize - 2) // 2 boarders 1 char wide
         }
         fn lines_height_vec(lines: &[Line], tui_rect: Rect) -> usize {
             return lines.iter().map(|x| line_height(x, tui_rect)).sum();
@@ -340,7 +336,7 @@ impl App<'_> {
         let seq = String::from_utf8_lossy(record.seq()).to_string();
         let matches: Vec<(IntervalSet<usize>, Color)> = search_patterns
             .iter()
-            .map(|x| (Self::search(record, x), x.color))
+            .map(|x| (Self::search(record, x).to_interval_set(), x.color))
             .collect::<Vec<(IntervalSet<usize>, Color)>>();
         vec![
             record.id().to_string().into(),
@@ -348,7 +344,7 @@ impl App<'_> {
         ]
     }
 
-    fn search(record: &fastq::Record, pattern: &SearchPattern) -> IntervalSet<usize> {
+    pub fn search(record: &fastq::Record, pattern: &SearchPattern) -> Vec<(usize, usize)> {
         if pattern.search_string.len() > 64 {
             panic!("Search pattern need to be less than 64 symbols long");
         }
@@ -366,9 +362,9 @@ impl App<'_> {
     fn search_generic<T: BitVec>(
         record: &fastq::Record,
         pattern: &SearchPattern,
-    ) -> IntervalSet<usize>
+    ) -> Vec<(usize, usize)>
     where
-        <T as BitVec>::DistType: From<u8>,
+        <T as BitVec>::DistType: From<u8> + Into<usize>,
     {
         let mut builder = MyersBuilder::new();
         for (base, equivalents) in vec![
@@ -390,17 +386,17 @@ impl App<'_> {
         let mut myers: Myers<T> = builder.build(pattern.search_string.clone().into_bytes());
         let mut matches = myers
             .find_all(record.seq(), pattern.edit_distance.into())
-            .map(|(start, end, dist)| (start, end - 1, dist))
-            .collect::<Vec<(usize, usize, <T as BitVec>::DistType)>>();
+            .map(|(start, end, dist)| (start, end - 1, dist.into()))
+            .collect::<Vec<(usize, usize, usize)>>();
         matches.sort_by_key(|(_, _, dist)| *dist);
 
-        // remove overlaps when better matches are found
-        let mut filtered_matches: Vec<(usize, usize, <T as BitVec>::DistType)> = Vec::new();
+        // remove greedy fuzzy matches that extends previous matches with mismatches only
+        let mut filtered_matches: Vec<(usize, usize, usize)> = Vec::new();
         for m in matches {
-            if filtered_matches
-                .iter()
-                .all(|(start, end, dist)| *dist == m.2 || m.0 > *end || m.1 < *start)
-            {
+            if !filtered_matches.iter().any(|(_, end, dist)| {
+                // m.1 - end == m.2 - dist
+                m.1 + dist == m.2 + end && m.2 != 0
+            }) {
                 filtered_matches.push(m);
             }
         }
@@ -409,6 +405,5 @@ impl App<'_> {
             .into_iter()
             .map(|(start, end, _)| (start, end))
             .collect::<Vec<(usize, usize)>>()
-            .to_interval_set()
     }
 }
