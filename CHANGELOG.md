@@ -2,6 +2,10 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.1.3]
+ * added summarize subcommand - to be moved to the UI interface later
+ * better handling of polyA/T patterns 
+
 ## [0.1.2]
  * added save pattern as CSV dialog box
 

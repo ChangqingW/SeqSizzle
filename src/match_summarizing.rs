@@ -9,7 +9,6 @@ pub enum ReadParts {
     Match(SearchPattern),
     Space,         // could be Space(usize) to indicate length
     NegativeSpace, // indicate two matches are overlapped
-    Repeatition,   // indicate the last pattern is repeated (e.g. polyA)
 }
 impl std::fmt::Display for ReadParts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -17,7 +16,6 @@ impl std::fmt::Display for ReadParts {
             ReadParts::Match(x) => write!(f, "{}", x.search_string),
             ReadParts::Space => write!(f, ".."),
             ReadParts::NegativeSpace => write!(f, "-"),
-            ReadParts::Repeatition => write!(f, "+"),
         }
     }
 }
@@ -100,7 +98,6 @@ fn test_categorise_read() {
             ReadParts::Match(x) => result.push_str(x.search_string.as_str()),
             ReadParts::Space => result.push_str(".."),
             ReadParts::NegativeSpace => result.push_str("-"),
-            ReadParts::Repeatition => result.push_str("+"),
         }
     }
     assert_eq!(
@@ -133,7 +130,7 @@ pub fn fmt_summarised_reads(summarised_reads: &[(Vec<ReadParts>, usize)]) -> Str
     for (read_parts, count) in summarised_reads {
         ret.push_str(
             format!(
-                "{}: {}\n",
+                "{}\t{}\n",
                 count,
                 read_parts
                     .iter()

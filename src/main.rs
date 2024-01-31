@@ -12,7 +12,7 @@ use crate::control::{handle_input, SearchPatternEdit, Update};
 use anyhow::Result;
 use app::{App, SearchPattern};
 use bio::io::fastq;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use event::{Event, EventHandler};
 use ratatui::prelude::{Color, CrosstermBackend, Terminal};
 use shadow_rs::shadow;
@@ -26,6 +26,9 @@ shadow!(build);
 #[command(author, about, long_about = None)]
 #[command(version = build::CLAP_LONG_VERSION)]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// The FASTQ file to view
     file: PathBuf,
 
@@ -57,6 +60,18 @@ struct Args {
     save_patterns_path: Option<PathBuf>,
 }
 
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Summarize the reads with patterns specified by the --patterns argument or the adapter
+    /// flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p
+    /// my_patterns.csv --adapter-3p summarize`.
+    /// '..' indicats unmatched regions of positive length, 
+    /// '-' indicates the patterns are overlapped, 
+    /// print the number of reads that match each pattern combination in TSV format. 
+    /// To be moved to the UI in the future.
+    Summarize,
+}
+
 fn main() -> Result<()> {
     if !shadow_rs::git_clean() {
         print!(
@@ -66,8 +81,6 @@ fn main() -> Result<()> {
     }
 
     let args = Args::parse();
-
-    let fastqs: Vec<fastq::Record> = fastq::Reader::from_file(args.file.clone())?.records().collect::<Result<Vec<_>, _>>()?;
 
     // add patterns based on command line arguments
     let mut patterns: Vec<SearchPattern> = Vec::new();
@@ -93,9 +106,6 @@ fn main() -> Result<()> {
             SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 1, ""),
         ]);
     }
-
-   println!("{}", match_summarizing::fmt_summarised_reads(&match_summarizing::summarise_reads(&fastqs, &patterns)));
-   return Ok(());
 
     // add patterns from CSV file
     if let Some(path) = args.patterns_path {
@@ -123,6 +133,28 @@ fn main() -> Result<()> {
             );
             patterns.push(pattern);
         });
+    }
+
+    if let Some(command) = args.command {
+        match command {
+            Commands::Summarize => {
+                if patterns.is_empty() {
+                    println!("Must specify --patterns or --adapter-3p or --adapter-5p to use the summarize subcommand, e.g. ./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize");
+                    return Err(anyhow::anyhow!("No patterns to summarize with"));
+                }
+                let fastqs: Vec<fastq::Record> = fastq::Reader::from_file(args.file.clone())?
+                    .records()
+                    .collect::<Result<Vec<_>, _>>()?;
+                println!("number_of_read\tpattern_combination");
+                print!(
+                    "{}",
+                    match_summarizing::fmt_summarised_reads(&match_summarizing::summarise_reads(
+                        &fastqs, &patterns
+                    ))
+                );
+            }
+        }
+        return Ok(());
     }
 
     let mut app = App::new(&args.file, patterns);
