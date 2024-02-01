@@ -70,7 +70,7 @@ fn categorise_read(record: &fastq::Record, search_patterns: &[SearchPattern]) ->
         matches[min_index].remove(0);
     }
 
-    if last_end < record.seq().len() {
+    if last_end + 1 < record.seq().len() {
         ret.push(ReadParts::Space);
     }
 
