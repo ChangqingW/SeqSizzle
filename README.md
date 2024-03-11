@@ -2,9 +2,13 @@ SeqSizzle is a pager for viewing FASTQ files with fuzzy matching, allowing diffe
 [Latest pre-built release binary](https://github.com/ChangqingW/SeqSizzle/releases/latest)  
 
 # Usage
-`./SeqSizzle -h`:
+`./seqsizzle -h`:
 ```
-Usage: SeqSizzle [OPTIONS] <FILE>
+Usage: seqsizzle [OPTIONS] <FILE> [COMMAND]
+
+Commands:
+  summarize  Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped, print the number of reads that match each pattern combination in TSV format. To be moved to the UI in the future
+  help       Print this message or the help of the given subcommand(s)
 
 Arguments:
   <FILE>  The FASTQ file to view
@@ -26,9 +30,7 @@ Options:
           Must have the following header:
           pattern,color,editdistance,comment
   -s, --save-patterns <SAVE_PATTERNS_PATH>
-          Save the search panel to a CSV file before quitting. 
-          To be removed in the future since you can now hit Ctrl-S in 
-          the search panel to save the patterns
+          Save the search panel to a CSV file before quitting. To be removed in the future since you can now hit Ctrl-S in the search panel to save the patterns
   -h, --help
           Print help
   -V, --version
