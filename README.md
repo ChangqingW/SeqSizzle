@@ -1,5 +1,30 @@
 SeqSizzle is a pager for viewing FASTQ files with fuzzy matching, allowing different adaptors to be colored differently.  
-[Latest pre-built release binary](https://github.com/ChangqingW/SeqSizzle/releases/latest)  
+
+# Installation
+
+### Pre-built binary
+
+[![Release](https://github.com/ChangqingW/SeqSizzle/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/ChangqingW/SeqSizzle/actions/workflows/rust.yml)  
+You can simply download and run the binary from [Github Actions](https://github.com/ChangqingW/SeqSizzle/releases/latest).
+
+### Cargo (crates.io)
+
+![Crates.io](https://img.shields.io/crates/v/seqsizzle?link=https%3A%2F%2Fcrates.io%2Fcrates%2Fsizzle)  
+If you already have [a Rust environment set up](https://rustup.rs), you can use the `cargo install` command:
+```
+cargo install seqsizzle
+```
+Cargo will build the `seqsizzle` binary and place it in `$HOME/.local/share/cargo/bin/seqsizzle`.
+
+### Cargo (git)
+
+If you already have a Rust environment set up, you can use the `cargo install` command in your local clone of the repo:
+```
+git clone https://github.com/ChangqingW/SeqSizzle
+cd SeqSizzle
+cargo install --path .
+```
+Cargo will build the `seqsizzle` binary and place it in `$HOME/.cargo`.
 
 # Usage
 `./seqsizzle -h`:

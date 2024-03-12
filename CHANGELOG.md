@@ -2,6 +2,10 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.1.4]
+ * renamed binary to `seqsizzle` to comply with Rust package naming conventions
+ * published `seqsizzle` on [crates.io](https://crates.io/crates/seqsizzle)
+
 ## [0.1.3]
  * added summarize subcommand - to be moved to the UI interface later
  * better handling of polyA/T patterns 
