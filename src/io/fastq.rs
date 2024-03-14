@@ -5,6 +5,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use std::fmt::Debug;
+use crate::io::fastx::FastxReader;
 
 // WIP: refactor
 // use a VecDeque to buffer records
@@ -189,27 +191,17 @@ pub struct FastqReader<R: Read + Seek> {
     buf_reader: BufReader<R>,
     records_buffer: VecDeque<fastq::Record>,
     offset: usize, // offset of the first record in the buffer
-    pub total_records: Option<usize>,
+    total_records: Option<usize>,
 }
 
-// Constructor for File
-impl FastqReader<File> {
-    pub fn from_path(path: &Path) -> Self {
-        Self::new(match File::open(path) {
-            Ok(mut file) => {
-                assert!(
-                    file.stream_position().is_ok(),
-                    "File not seekable, are you using a pipe? Consider saving to an actual file"
-                );
-                file
-            }
-            Err(e) => panic!("Error opening file '{}': {:?}", path.to_string_lossy(), e),
-        })
+impl<R: Read + Seek + Debug> FastqReader<R> {
+    fn pop_front(&mut self) {
+        if self.records_buffer.pop_front().is_some() {
+            self.offset += 1;
+        } else {
+            panic!("pop_front called on empty buffer");
+        }
     }
-}
-
-// Generic methods
-impl<R: Read + Seek> FastqReader<R> {
     pub fn new(mut reader: R) -> Self {
         assert!(
             reader.stream_position().unwrap() == 0,
@@ -224,8 +216,12 @@ impl<R: Read + Seek> FastqReader<R> {
         ret.fill_buffer().unwrap();
         ret
     }
+}
 
-    pub fn fill_buffer(&mut self) -> Result<(), std::io::Error> {
+// Generic methods
+impl<R: Read + Seek + Debug> FastxReader<R> for FastqReader<R> {
+
+    fn fill_buffer(&mut self) -> Result<(), std::io::Error> {
         for _ in 0..RECORD_BUF_SIZE {
             match next(&mut self.buf_reader)? {
                 Some(res) => {
@@ -240,15 +236,7 @@ impl<R: Read + Seek> FastqReader<R> {
         Ok(())
     }
 
-    fn pop_front(&mut self) {
-        if self.records_buffer.pop_front().is_some() {
-            self.offset += 1;
-        } else {
-            panic!("pop_front called on empty buffer");
-        }
-    }
-
-    pub fn rewind(&mut self) -> Result<(), std::io::Error> {
+    fn rewind(&mut self) -> Result<(), std::io::Error> {
         if self.offset != 0 {
             self.records_buffer.clear();
             self.buf_reader.rewind()?;
@@ -265,7 +253,7 @@ impl<R: Read + Seek> FastqReader<R> {
     /// records after the index
     /// if the index is before the current buffer, rewind the buffer to RECORD_BUF_SIZE/4
     /// records before the index
-    pub fn get_index(&mut self, index: usize) -> Result<Option<fastq::Record>, std::io::Error> {
+    fn get_index(&mut self, index: usize) -> Result<Option<fastq::Record>, std::io::Error> {
         if self.total_records.is_some() && index > self.total_records.unwrap() {
             return Ok(None);
         }
