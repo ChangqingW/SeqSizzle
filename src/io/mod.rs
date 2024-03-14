@@ -1,1 +1,3 @@
-pub mod fastq;
+mod fastq;
+mod fasta;
+pub mod fastx;

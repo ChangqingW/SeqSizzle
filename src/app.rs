@@ -1,6 +1,7 @@
-use crate::io::fastq::FastqReader;
 use crate::read_stylizing::highlight_matches;
 use crate::search_panel::SearchPanel;
+use crate::io::fastx::FastxReader;
+use crate::io::fastx;
 
 use bio::io::fastq;
 use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
@@ -29,7 +30,8 @@ pub struct App<'a> {
     // offset of the rendered lines to the file
     // scroll within the viewed lines -- reset to 0 on resize
     pub scroll_status: (usize, usize),
-    reader: FastqReader<File>,
+    // reader: FastqReader<File>,
+    reader: Box<dyn FastxReader<File>>,
     message: TransientMessage,
 }
 
@@ -82,7 +84,7 @@ impl TransientMessage {
 
 impl App<'_> {
     pub fn new(file: &Path, search_patterns: Vec<SearchPattern>) -> Self {
-        let reader = FastqReader::from_path(file);
+        let reader = Box::new(fastx::from_path(file));
         let mut instance = App {
             quit: false,
             search_patterns: search_patterns.clone(),
