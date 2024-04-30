@@ -121,8 +121,8 @@ pub fn summarise_reads(
     ret.sort_by_key(|x| x.1);
     // into percentage
     if !as_counts {
-        let total: usize = reads.len() / 100;
-        ret.iter_mut().for_each(|(_, count)| *count /= total);
+        let total: f64 = reads.len() as f64 / 100.0;
+        ret.iter_mut().for_each(|(_, count)| *count = (*count as f64 / total).round() as usize);
     }
     ret
 }
