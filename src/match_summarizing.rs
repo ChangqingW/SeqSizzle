@@ -74,9 +74,6 @@ fn categorise_read(record: &fastq::Record, search_patterns: &[SearchPattern]) ->
         ret.push(ReadParts::Space);
     }
 
-    if fmt_summarised_reads(&[(ret.clone(), 0)]) == "0: ..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG..\n" {
-        println!("{}", String::from_utf8_lossy(record.seq()));
-    }
     ret
 }
 
@@ -121,6 +118,9 @@ pub fn summarise_reads(
     // sort by count and return
     let mut ret: Vec<(Vec<ReadParts>, usize)> = map.into_iter().collect();
     ret.sort_by_key(|x| x.1);
+    // into percentage
+    let total: usize = reads.len() / 100;
+    ret.iter_mut().for_each(|(_, count)| *count /= total);
     ret
 }
 
@@ -130,7 +130,7 @@ pub fn fmt_summarised_reads(summarised_reads: &[(Vec<ReadParts>, usize)]) -> Str
     for (read_parts, count) in summarised_reads {
         ret.push_str(
             format!(
-                "{}\t{}\n",
+                "{}%\t{}\n",
                 count,
                 read_parts
                     .iter()
