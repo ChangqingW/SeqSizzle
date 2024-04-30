@@ -107,6 +107,7 @@ fn test_categorise_read() {
 pub fn summarise_reads(
     reads: &[fastq::Record],
     search_patterns: &[SearchPattern],
+    as_counts: bool
 ) -> Vec<(Vec<ReadParts>, usize)> {
     let mut map: HashMap<Vec<ReadParts>, usize> = HashMap::new();
     for read in reads {
@@ -119,19 +120,22 @@ pub fn summarise_reads(
     let mut ret: Vec<(Vec<ReadParts>, usize)> = map.into_iter().collect();
     ret.sort_by_key(|x| x.1);
     // into percentage
-    let total: usize = reads.len() / 100;
-    ret.iter_mut().for_each(|(_, count)| *count /= total);
+    if !as_counts {
+        let total: usize = reads.len() / 100;
+        ret.iter_mut().for_each(|(_, count)| *count /= total);
+    }
     ret
 }
 
 /// format summrised catagories
-pub fn fmt_summarised_reads(summarised_reads: &[(Vec<ReadParts>, usize)]) -> String {
+pub fn fmt_summarised_reads(summarised_reads: &[(Vec<ReadParts>, usize)], as_counts: bool) -> String {
     let mut ret = String::new();
     for (read_parts, count) in summarised_reads {
         ret.push_str(
             format!(
-                "{}%\t{}\n",
+                "{}{}\t{}\n",
                 count,
+                if as_counts { "" } else { "%" },
                 read_parts
                     .iter()
                     .map(|x| x.to_string())

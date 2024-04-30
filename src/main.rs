@@ -69,7 +69,11 @@ enum Commands {
     /// '-' indicates the patterns are overlapped, 
     /// print the number of reads that match each pattern combination in TSV format. 
     /// To be moved to the UI in the future.
-    Summarize,
+    Summarize {
+        /// Print the counts of each summarized catagory instead of the percentage
+        #[clap(long)]
+        counts: bool,
+    }
 }
 
 fn main() -> Result<()> {
@@ -137,7 +141,7 @@ fn main() -> Result<()> {
 
     if let Some(command) = args.command {
         match command {
-            Commands::Summarize => {
+            Commands::Summarize { counts } => {
                 if patterns.is_empty() {
                     println!("Must specify --patterns or --adapter-3p or --adapter-5p to use the summarize subcommand, e.g. ./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize");
                     return Err(anyhow::anyhow!("No patterns to summarize with"));
@@ -149,8 +153,8 @@ fn main() -> Result<()> {
                 print!(
                     "{}",
                     match_summarizing::fmt_summarised_reads(&match_summarizing::summarise_reads(
-                        &fastqs, &patterns
-                    ))
+                        &fastqs, &patterns, counts
+                    ), counts)
                 );
             }
         }

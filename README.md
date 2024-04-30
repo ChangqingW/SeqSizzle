@@ -7,6 +7,13 @@ SeqSizzle is a pager for viewing FASTQ files with fuzzy matching, allowing diffe
 [![Release](https://github.com/ChangqingW/SeqSizzle/workflows/Release/badge.svg)](https://github.com/ChangqingW/SeqSizzle/actions/workflows/rust.yml)  
 You can simply download and run the binary from [Github Actions](https://github.com/ChangqingW/SeqSizzle/releases/latest).
 
+### Conda
+
+SeqSizzle is also available on [bioconda](https://bioconda.github.io/recipes/seqsizzle/README.html):
+```
+conda install -c bioconda -c conda-forge seqsizzle
+```
+
 ### Cargo (crates.io)
 
 [![Crates.io Version](https://img.shields.io/crates/v/seqsizzle?link=https%3A%2F%2Fcrates.io%2Fcrates%2Fseqsizzle)](https://crates.io/crates/seqsizzle)
