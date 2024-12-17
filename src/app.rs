@@ -6,7 +6,7 @@ use bio::io::fastq;
 use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
 use interval::interval_set::ToIntervalSet;
 use interval::IntervalSet;
-use ratatui::prelude::{Color, Line, Rect};
+use ratatui::prelude::{Color, Line, Size};
 
 use rayon::prelude::*;
 use std::collections::VecDeque;
@@ -170,25 +170,25 @@ impl App<'_> {
         }
     }
 
-    pub fn scroll(&mut self, num: isize, tui_rect: Rect) {
+    pub fn scroll(&mut self, num: isize, tui_size: Size) {
         /// scroll the rendered lines by num
         /// rendered_lines append / pop lines if scrolling beyond a read
 
         // line height in tui
-        fn line_height(line: &Line, tui_rect: Rect) -> usize {
-            line.width().div_ceil(tui_rect.width as usize - 2) // 2 boarders 1 char wide
+        fn line_height(line: &Line, tui_size: Size) -> usize {
+            line.width().div_ceil(tui_size.width as usize - 2) // 2 boarders 1 char wide
         }
-        fn lines_height_vec(lines: &[Line], tui_rect: Rect) -> usize {
-            return lines.iter().map(|x| line_height(x, tui_rect)).sum();
+        fn lines_height_vec(lines: &[Line], tui_size: Size) -> usize {
+            return lines.iter().map(|x| line_height(x, tui_size)).sum();
         }
         fn lines_height_vecdeque(
             lines: &VecDeque<Line>,
             indexes: &[usize],
-            tui_rect: Rect,
+            tui_size: Size,
         ) -> usize {
             return indexes
                 .iter()
-                .map(|x| line_height(&lines[*x], tui_rect))
+                .map(|x| line_height(&lines[*x], tui_size))
                 .sum();
         }
 
@@ -202,7 +202,7 @@ impl App<'_> {
                 // scroll within the first line
                 let remaining = self.scroll_status.1 as isize + num;
                 self.scroll_status.1 = remaining.max(0) as usize;
-                return self.scroll(remaining.min(0), tui_rect);
+                return self.scroll(remaining.min(0), tui_size);
             } else {
                 let mut remaining = num;
                 while remaining < 0 && self.scroll_status.0 > 0 {
@@ -214,7 +214,7 @@ impl App<'_> {
                             .expect("Failed to fetch previous record while scroll_status.0 > 1"),
                         &self.search_patterns,
                     );
-                    remaining += lines_height_vec(&lines[0..2], tui_rect) as isize;
+                    remaining += lines_height_vec(&lines[0..2], tui_size) as isize;
                     lines
                         .into_iter()
                         .rev()
@@ -234,7 +234,7 @@ impl App<'_> {
         } else if num > 0 {
             let mut remaining: isize = num + self.scroll_status.1 as isize; // remaining lines to scroll
             let mut current_line_height =
-                lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_rect);
+                lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_size);
             self.scroll_status.1 = 0;
 
             while remaining >= current_line_height as isize {
@@ -247,9 +247,9 @@ impl App<'_> {
                     let max_scroll = 3 + self
                         .rendered_lines // 2 x boarders 1 char high, plus 1 empty line to indicate EOF
                         .iter()
-                        .map(|x| line_height(x, tui_rect))
+                        .map(|x| line_height(x, tui_size))
                         .sum::<usize>()
-                        .saturating_sub(tui_rect.height as usize);
+                        .saturating_sub(tui_size.height as usize);
                     self.scroll_status.1 =
                         (self.scroll_status.1 + remaining as usize).min(max_scroll);
                     if self.scroll_status.1 == max_scroll {
@@ -270,7 +270,7 @@ impl App<'_> {
                     .for_each(|x| self.rendered_lines.push_back(x));
                 remaining -= current_line_height as isize;
                 current_line_height =
-                    lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_rect);
+                    lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_size);
             }
             self.scroll_status.1 = remaining as usize;
             return;
@@ -297,7 +297,7 @@ impl App<'_> {
         self.message.get()
     }
 
-    pub fn resized_update(&mut self, tui_rect: Rect) {
+    pub fn resized_update(&mut self, tui_size: Size) {
         // TODO
         self.scroll_status.1 = 0;
     }

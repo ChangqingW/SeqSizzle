@@ -2,7 +2,7 @@ use crate::app::{App, SearchPattern, UIMode};
 use crate::search_panel::{PanelElement, PanelElementName};
 use crate::{Event, Tui};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::prelude::{Color, Rect};
+use ratatui::prelude::{Color, Size};
 use std::str::FromStr;
 
 pub enum Update {
@@ -14,7 +14,7 @@ pub enum Update {
     CycleSearchPattern(bool),
     ToggleUIMode,
     ScrollViewer(isize),
-    WindowResize(Rect),
+    WindowResize(Size),
     Msg(String),
     Quit,
     None,

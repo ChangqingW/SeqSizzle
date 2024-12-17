@@ -2,6 +2,10 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.1.5]
+ * fixed build error (expected `Rect`, found `Size`)
+ * updated summarize subcommand option to print percentages or counts
+
 ## [0.1.4]
  * renamed binary to `seqsizzle` to comply with Rust package naming conventions
  * published `seqsizzle` on [crates.io](https://crates.io/crates/seqsizzle)

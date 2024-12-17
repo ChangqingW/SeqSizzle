@@ -6,7 +6,7 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 pub type CrosstermTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stderr>>;
-use ratatui::prelude::Rect;
+use ratatui::prelude::Size;
 
 use crate::{app::App, event::EventHandler, ui::render};
 
@@ -64,7 +64,7 @@ impl Tui {
         self.terminal.show_cursor()?;
         Ok(())
     }
-    pub fn size(&self) -> Rect {
+    pub fn size(&self) -> Size {
         self.terminal.size().unwrap()
     }
 }
