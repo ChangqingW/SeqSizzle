@@ -1,6 +1,6 @@
 use crate::app::{App, SearchPattern};
-use bio::io::fastq;
-use ratatui::style::Color;
+use crate::io::SequenceRecord;
+use ratatui::prelude::Color;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
@@ -21,7 +21,7 @@ impl std::fmt::Display for ReadParts {
 }
 
 /// Categorise a read
-fn categorise_read(record: &fastq::Record, search_patterns: &[SearchPattern]) -> Vec<ReadParts> {
+fn categorise_read(record: &SequenceRecord, search_patterns: &[SearchPattern]) -> Vec<ReadParts> {
     // merge overlapping intervals
     fn merge_overlap(mut intervals: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
         intervals.sort_by_key(|x| x.0);
@@ -79,18 +79,17 @@ fn categorise_read(record: &fastq::Record, search_patterns: &[SearchPattern]) ->
 
 #[test]
 fn test_categorise_read() {
-    let fastq: fastq::Record = fastq::Record::with_attrs(
-        "id",
-        None,
-        b"ATCGCCATCGCCATCGCCATCGATCAAATCGGATC",
-        b"!!!!!!!!!!!!!!!!!!!!!!",
-    );
+    let sequence_record = SequenceRecord::Fasta {
+        id: "id".to_string(),
+        description: None,
+        seq: b"ATCGCCATCGCCATCGCCATCGATCAAATCGGATC".to_vec(),
+    };
     let patterns = vec![
         SearchPattern::new(String::from("ATCG"), Color::Red, 0, ""),
         SearchPattern::new(String::from("GATC"), Color::Red, 0, ""),
     ];
     let mut result = String::new();
-    for i in categorise_read(&fastq, &patterns) {
+    for i in categorise_read(&sequence_record, &patterns) {
         match i {
             ReadParts::Match(x) => result.push_str(x.search_string.as_str()),
             ReadParts::Space => result.push_str(".."),
@@ -105,7 +104,7 @@ fn test_categorise_read() {
 
 /// Catagories reads and reutrn counts for each category
 pub fn summarise_reads(
-    reads: &[fastq::Record],
+    reads: &[SequenceRecord],
     search_patterns: &[SearchPattern],
     as_counts: bool
 ) -> Vec<(Vec<ReadParts>, usize)> {

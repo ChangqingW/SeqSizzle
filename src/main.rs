@@ -21,7 +21,7 @@ use tui::Tui;
 
 shadow!(build);
 
-/// A pager for viewing FASTQ files with fuzzy matching, allowing different adaptors to be colored differently.
+/// A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.
 #[derive(Parser, Debug)]
 #[command(author, about, long_about = None)]
 #[command(version = build::CLAP_LONG_VERSION)]
@@ -29,7 +29,7 @@ struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// The FASTQ file to view (supports .fastq and .fastq.gz formats)
+    /// The FASTQ or FASTA file to view (supports .fastq, .fasta, .fa, .fq and their .gz variants)
     file: PathBuf,
 
     /// Start with 10x 3' kit adaptors:
@@ -146,14 +146,20 @@ fn main() -> Result<()> {
                     println!("Must specify --patterns or --adapter-3p or --adapter-5p to use the summarize subcommand, e.g. ./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize");
                     return Err(anyhow::anyhow!("No patterns to summarize with"));
                 }
-                let fastqs: Vec<fastq::Record> = fastq::Reader::from_file(args.file.clone())?
-                    .records()
-                    .collect::<Result<Vec<_>, _>>()?;
+                // Read all records using SequenceReader
+                use crate::io::SequenceReader;
+                let mut reader = SequenceReader::from_path(&args.file)?;
+                let mut records = Vec::new();
+                let mut index = 0;
+                while let Some(record) = reader.get_index(index)? {
+                    records.push(record);
+                    index += 1;
+                }
                 println!("number_of_read\tpattern_combination");
                 print!(
                     "{}",
                     match_summarizing::fmt_summarised_reads(&match_summarizing::summarise_reads(
-                        &fastqs, &patterns, counts
+                        &records, &patterns, counts
                     ), counts)
                 );
             }

@@ -1,4 +1,4 @@
-use crate::io::fastq::FastqReader;
+use crate::io::{SequenceReader, SequenceRecord, FileFormat};
 use crate::read_stylizing::highlight_matches;
 use crate::search_panel::SearchPanel;
 
@@ -29,7 +29,7 @@ pub struct App<'a> {
     // offset of the rendered lines to the file
     // scroll within the viewed lines -- reset to 0 on resize
     pub scroll_status: (usize, usize),
-    reader: FastqReader<File>,
+    reader: SequenceReader<File>,
     message: TransientMessage,
 }
 
@@ -82,7 +82,7 @@ impl TransientMessage {
 
 impl App<'_> {
     pub fn new(file: &Path, search_patterns: Vec<SearchPattern>) -> Result<Self, std::io::Error> {
-        let reader = FastqReader::from_path(file)?;
+        let reader = SequenceReader::from_path(file)?;
         let mut instance = App {
             quit: false,
             search_patterns: search_patterns.clone(),
@@ -307,7 +307,7 @@ impl App<'_> {
     pub fn update(&mut self) {
         let records = (self.scroll_status.0..self.scroll_status.0 + RENDER_BUF_SIZE)
             .filter_map(|i| self.reader.get_index(i).expect("Failed to get index"))
-            .collect::<Vec<fastq::Record>>();
+            .collect::<Vec<SequenceRecord>>();
         if records.len() < RENDER_BUF_SIZE {
             self.set_message(format!(
                 "EOF reached during app.update, {} records rendered",
@@ -318,7 +318,7 @@ impl App<'_> {
     }
 
     fn records_to_lines<'a>(
-        records: &[fastq::Record],
+        records: &[SequenceRecord],
         search_patterns: &[SearchPattern],
     ) -> VecDeque<Line<'a>> {
         // parallel by record
@@ -330,7 +330,7 @@ impl App<'_> {
     }
 
     fn record_to_lines<'a>(
-        record: &fastq::Record,
+        record: &SequenceRecord,
         search_patterns: &[SearchPattern],
     ) -> Vec<Line<'a>> {
         let seq = String::from_utf8_lossy(record.seq()).to_string();
@@ -338,13 +338,14 @@ impl App<'_> {
             .iter()
             .map(|x| (Self::search(record, x).to_interval_set(), x.color))
             .collect::<Vec<(IntervalSet<usize>, Color)>>();
+        
         vec![
             record.id().to_string().into(),
             highlight_matches(&matches, seq, Color::Gray),
         ]
     }
 
-    pub fn search(record: &fastq::Record, pattern: &SearchPattern) -> Vec<(usize, usize)> {
+    pub fn search(record: &SequenceRecord, pattern: &SearchPattern) -> Vec<(usize, usize)> {
         if pattern.search_string.len() > 64 {
             panic!("Search pattern need to be less than 64 symbols long");
         }
@@ -360,7 +361,7 @@ impl App<'_> {
     }
 
     fn search_generic<T: BitVec>(
-        record: &fastq::Record,
+        record: &SequenceRecord,
         pattern: &SearchPattern,
     ) -> Vec<(usize, usize)>
     where
