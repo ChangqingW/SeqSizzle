@@ -29,7 +29,7 @@ struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// The FASTQ file to view
+    /// The FASTQ file to view (supports .fastq and .fastq.gz formats)
     file: PathBuf,
 
     /// Start with 10x 3' kit adaptors:
@@ -161,7 +161,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut app = App::new(&args.file, patterns);
+    let mut app = App::new(&args.file, patterns)?;
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());

@@ -81,8 +81,8 @@ impl TransientMessage {
 }
 
 impl App<'_> {
-    pub fn new(file: &Path, search_patterns: Vec<SearchPattern>) -> Self {
-        let reader = FastqReader::from_path(file);
+    pub fn new(file: &Path, search_patterns: Vec<SearchPattern>) -> Result<Self, std::io::Error> {
+        let reader = FastqReader::from_path(file)?;
         let mut instance = App {
             quit: false,
             search_patterns: search_patterns.clone(),
@@ -95,7 +95,7 @@ impl App<'_> {
             scroll_status: (0, 0),
         };
         instance.update();
-        instance
+        Ok(instance)
     }
 
     /// Set running to false to quit the application.

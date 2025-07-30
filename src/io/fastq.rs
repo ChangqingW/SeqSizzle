@@ -1,4 +1,5 @@
 use bio::io::fastq;
+use flate2::read::GzDecoder;
 use std::collections::VecDeque;
 use std::env::temp_dir;
 use std::fs::File;
@@ -184,45 +185,89 @@ fn test_buf_size() {
     assert_eq!(RECORD_BUF_SIZE, 4);
 }
 
+/// Decompresses a gzipped file to a temporary file and returns the path
+fn decompress_gz_to_temp(gz_path: &Path) -> Result<PathBuf, std::io::Error> {
+    let gz_file = File::open(gz_path)?;
+    let mut decoder = GzDecoder::new(gz_file);
+    
+    let mut temp_path = temp_dir();
+    temp_path.push(format!("{}.fastq", Uuid::new_v4()));
+    
+    let mut temp_file = File::create(&temp_path)?;
+    std::io::copy(&mut decoder, &mut temp_file)?;
+    temp_file.sync_all()?;
+    
+    Ok(temp_path)
+}
+
 #[derive(Debug)]
 pub struct FastqReader<R: Read + Seek> {
     buf_reader: BufReader<R>,
     records_buffer: VecDeque<fastq::Record>,
     offset: usize, // offset of the first record in the buffer
     pub total_records: Option<usize>,
+    temp_file_path: Option<PathBuf>, // Track temporary file for cleanup
 }
 
 // Constructor for File
 impl FastqReader<File> {
-    pub fn from_path(path: &Path) -> Self {
-        Self::new(match File::open(path) {
-            Ok(mut file) => {
-                assert!(
-                    file.stream_position().is_ok(),
+    pub fn from_path(path: &Path) -> Result<Self, std::io::Error> {
+        // Check if this is a gzipped file
+        let is_gzipped = path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("gz"))
+            .unwrap_or(false);
+        
+        if is_gzipped {
+            // Decompress to temporary file and read from there
+            let temp_path = decompress_gz_to_temp(path)?;
+            let file = File::open(&temp_path)
+                .map_err(|e| std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Error opening decompressed file '{}': {}", temp_path.to_string_lossy(), e)
+                ))?;
+            
+            let mut reader = Self::new(file)?;
+            reader.temp_file_path = Some(temp_path);
+            Ok(reader)
+        } else {
+            // Handle regular files
+            let mut file = File::open(path)
+                .map_err(|e| std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Error opening file '{}': {}", path.to_string_lossy(), e)
+                ))?;
+            
+            if file.stream_position().is_err() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
                     "File not seekable, are you using a pipe? Consider saving to an actual file"
-                );
-                file
+                ));
             }
-            Err(e) => panic!("Error opening file '{}': {:?}", path.to_string_lossy(), e),
-        })
+            
+            Self::new(file)
+        }
     }
 }
 
 // Generic methods
 impl<R: Read + Seek> FastqReader<R> {
-    pub fn new(mut reader: R) -> Self {
-        assert!(
-            reader.stream_position().unwrap() == 0,
-            "reader not at the start of the file"
-        );
+    pub fn new(mut reader: R) -> Result<Self, std::io::Error> {
+        if reader.stream_position()? != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "reader not at the start of the file"
+            ));
+        }
         let mut ret = Self {
             buf_reader: BufReader::with_capacity(READER_BUF_SIZE, reader),
             records_buffer: VecDeque::with_capacity(RECORD_BUF_SIZE + 1),
             offset: 0,
             total_records: None,
+            temp_file_path: None,
         };
-        ret.fill_buffer().unwrap();
-        ret
+        ret.fill_buffer()?;
+        Ok(ret)
     }
 
     pub fn fill_buffer(&mut self) -> Result<(), std::io::Error> {
@@ -240,11 +285,15 @@ impl<R: Read + Seek> FastqReader<R> {
         Ok(())
     }
 
-    fn pop_front(&mut self) {
+    fn pop_front(&mut self) -> Result<(), std::io::Error> {
         if self.records_buffer.pop_front().is_some() {
             self.offset += 1;
+            Ok(())
         } else {
-            panic!("pop_front called on empty buffer");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "pop_front called on empty buffer"
+            ))
         }
     }
 
@@ -278,7 +327,7 @@ impl<R: Read + Seek> FastqReader<R> {
                     Some(res) => {
                         self.records_buffer.push_back(res);
                         if self.records_buffer.len() > RECORD_BUF_SIZE {
-                            self.pop_front();
+                            self.pop_front()?;
                         }
                     }
                     None => {
@@ -307,7 +356,20 @@ impl<R: Read + Seek> FastqReader<R> {
                 return Ok(Some(self.records_buffer[RECORD_BUF_SIZE / 4].clone()));
             }
         } else {
-            panic!("unexpected case in get_index");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "unexpected case in get_index"
+            ))
+        }
+    }
+}
+
+impl<R: Read + Seek> Drop for FastqReader<R> {
+    fn drop(&mut self) {
+        if let Some(temp_path) = &self.temp_file_path {
+            if let Err(e) = std::fs::remove_file(temp_path) {
+                eprintln!("Warning: Failed to remove temporary file '{}': {}", temp_path.display(), e);
+            }
         }
     }
 }
@@ -331,7 +393,7 @@ fn setup_test() -> (PathBuf, FastqReader<File>, Vec<fastq::Record>) {
     )
     .unwrap();
     file.sync_all().unwrap();
-    let reader = FastqReader::new(File::open(file_name.clone()).unwrap());
+    let reader = FastqReader::new(File::open(file_name.clone()).unwrap()).unwrap();
     let records: Vec<fastq::Record> = fastq::Reader::new(File::open(file_name.clone()).unwrap())
         .records()
         .map(|r| r.unwrap())
