@@ -18,6 +18,8 @@ const RENDER_BUF_SIZE: usize = 24;
 #[cfg(not(debug_assertions))]
 const RENDER_BUF_SIZE: usize = 100;
 
+const DEFAULT_QUALITY_THRESHOLD: u8 = 10;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum QualityStyleMode {
     None,
@@ -365,6 +367,76 @@ impl App<'_> {
         self.rendered_lines = Self::records_to_lines(&records, &self.search_patterns, &self.styling_config);
     }
 
+    /// Toggle quality-based italic styling on/off
+    pub fn toggle_quality_italic(&mut self) {
+        use QualityStyleMode::*;
+        
+        self.styling_config.quality_style_mode = match self.styling_config.quality_style_mode {
+            QualityStyleMode::None => {
+                // Enable italic with default threshold if no threshold set
+                if self.styling_config.quality_threshold.is_none() {
+                    self.styling_config.quality_threshold = Some(DEFAULT_QUALITY_THRESHOLD);
+                }
+                Italic
+            },
+            Italic => QualityStyleMode::None,
+            Background => {
+                // Enable both italic and background
+                Both
+            },
+            Both => Background, // Turn off italic, keep background
+        };
+        
+        // Disable threshold if no styling is active
+        if matches!(self.styling_config.quality_style_mode, QualityStyleMode::None) {
+            self.styling_config.quality_threshold = Option::None;
+        }
+        
+        // Show status message
+        let status = match self.styling_config.quality_style_mode {
+            QualityStyleMode::None => "Quality styling disabled",
+            Italic => "Quality italic styling enabled",
+            Background => "Quality background styling enabled", 
+            Both => "Quality italic and background styling enabled",
+        };
+        self.set_message(status.to_string());
+    }
+
+    /// Toggle quality-based background color styling on/off
+    pub fn toggle_quality_background(&mut self) {
+        use QualityStyleMode::*;
+        
+        self.styling_config.quality_style_mode = match self.styling_config.quality_style_mode {
+            QualityStyleMode::None => {
+                // Enable background with default threshold if no threshold set
+                if self.styling_config.quality_threshold.is_none() {
+                    self.styling_config.quality_threshold = Some(DEFAULT_QUALITY_THRESHOLD);
+                }
+                Background
+            },
+            Italic => {
+                // Enable both italic and background
+                Both
+            },
+            Background => QualityStyleMode::None,
+            Both => Italic, // Turn off background, keep italic
+        };
+        
+        // Disable threshold if no styling is active
+        if matches!(self.styling_config.quality_style_mode, QualityStyleMode::None) {
+            self.styling_config.quality_threshold = Option::None;
+        }
+        
+        // Show status message
+        let status = match self.styling_config.quality_style_mode {
+            None => "Quality styling disabled",
+            Italic => "Quality italic styling enabled",
+            Background => "Quality background styling enabled",
+            Both => "Quality italic and background styling enabled",
+        };
+        self.set_message(status.to_string());
+    }
+
     fn records_to_lines<'a>(
         records: &[SequenceRecord],
         search_patterns: &[SearchPattern],
@@ -413,8 +485,13 @@ impl App<'_> {
         if let (Some(threshold), SequenceRecord::Fastq(fastq_record)) = 
             (config.quality_threshold, record) {
             
+            // Convert ASCII quality scores to Phred+33 quality values
+            let quality_scores: Vec<u8> = fastq_record.qual().iter()
+                .map(|&ascii_qual| ascii_qual.saturating_sub(33))
+                .collect();
+            
             // Process each position
-            for (i, &quality) in fastq_record.qual().iter().enumerate() {
+            for (i, &quality) in quality_scores.iter().enumerate() {
                 let is_low_quality = quality < threshold;
                 
                 // Set italic positions
@@ -429,27 +506,29 @@ impl App<'_> {
             // Create background color intervals for quality
             match config.quality_style_mode {
                 QualityStyleMode::Background | QualityStyleMode::Both => {
-                    // Group consecutive same-quality ranges into intervals
-                    let mut current_start = 0;
-                    let mut current_quality = fastq_record.qual()[0];
-                    
-                    for (i, &quality) in fastq_record.qual().iter().enumerate().skip(1) {
-                        if quality != current_quality {
-                            // End current interval and start new one
-                            let color = quality_to_bg_color(current_quality);
-                            let interval = vec![(current_start, i - 1)].to_interval_set();
-                            bg_intervals.push((interval, color));
-                            
-                            current_start = i;
-                            current_quality = quality;
+                    if !quality_scores.is_empty() {
+                        // Group consecutive same-quality ranges into intervals
+                        let mut current_start = 0;
+                        let mut current_quality = quality_scores[0];
+                        
+                        for (i, &quality) in quality_scores.iter().enumerate().skip(1) {
+                            if quality != current_quality {
+                                // End current interval and start new one
+                                let color = quality_to_bg_color(current_quality);
+                                let interval = vec![(current_start, i - 1)].to_interval_set();
+                                bg_intervals.push((interval, color));
+                                
+                                current_start = i;
+                                current_quality = quality;
+                            }
                         }
-                    }
-                    
-                    // Add final interval
-                    if current_start < seq_len {
-                        let color = quality_to_bg_color(current_quality);
-                        let interval = vec![(current_start, seq_len - 1)].to_interval_set();
-                        bg_intervals.push((interval, color));
+                        
+                        // Add final interval
+                        if current_start < seq_len {
+                            let color = quality_to_bg_color(current_quality);
+                            let interval = vec![(current_start, seq_len - 1)].to_interval_set();
+                            bg_intervals.push((interval, color));
+                        }
                     }
                 }
                 _ => {}
@@ -1309,7 +1388,8 @@ mod tests {
 
     #[test]
     fn test_get_quality_styling_no_config() {
-        let record = create_fastq_test_record("test", b"ATCG", &[30, 10, 20, 35]);
+        // ASCII quality scores: Quality 30: ASCII 63, Quality 10: ASCII 43, Quality 20: ASCII 53, Quality 35: ASCII 68
+        let record = create_fastq_test_record("test", b"ATCG", &[63, 43, 53, 68]);
         let config = StylingConfig::default();
         
         let (italic_positions, bg_intervals) = App::get_quality_styling(&record, &config);
@@ -1319,7 +1399,9 @@ mod tests {
 
     #[test]
     fn test_get_quality_styling_with_threshold() {
-        let record = create_fastq_test_record("test", b"ATCG", &[30, 10, 20, 35]);
+        // Create FASTQ record with ASCII quality scores
+        // Quality 30: ASCII 63 ('?'), Quality 10: ASCII 43 ('+'), Quality 20: ASCII 53 ('5'), Quality 35: ASCII 68 ('D')
+        let record = create_fastq_test_record("test", b"ATCG", &[63, 43, 53, 68]); // Qualities: 30, 10, 20, 35
         let config = StylingConfig::new()
             .with_quality_threshold(25)
             .with_quality_style_mode(QualityStyleMode::Italic);
@@ -1333,7 +1415,8 @@ mod tests {
 
     #[test]
     fn test_get_quality_styling_background_mode() {
-        let record = create_fastq_test_record("test", b"ATCG", &[30, 30, 10, 10]);
+        // ASCII quality scores: Quality 30: ASCII 63, Quality 10: ASCII 43
+        let record = create_fastq_test_record("test", b"ATCG", &[63, 63, 43, 43]); // Qualities: 30, 30, 10, 10
         let config = StylingConfig::new()
             .with_quality_threshold(25)
             .with_quality_style_mode(QualityStyleMode::Background);
