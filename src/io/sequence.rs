@@ -253,8 +253,8 @@ fn skip_n_records<R: Read + Seek>(
     Ok(())
 }
 
-/// Decompresses a gzipped file to a temporary file and returns the path
-fn decompress_gz_to_temp(gz_path: &Path) -> Result<PathBuf, std::io::Error> {
+/// Decompresses a gzipped file to a temporary file, limiting to first 10MB to avoid truncating records
+fn decompress_gz_to_temp(gz_path: &Path, format: FileFormat) -> Result<(PathBuf, bool), std::io::Error> {
     let gz_file = File::open(gz_path)?;
     let mut decoder = GzDecoder::new(gz_file);
     
@@ -262,10 +262,83 @@ fn decompress_gz_to_temp(gz_path: &Path) -> Result<PathBuf, std::io::Error> {
     temp_path.push(format!("{}.seq", Uuid::new_v4()));
     
     let mut temp_file = File::create(&temp_path)?;
-    std::io::copy(&mut decoder, &mut temp_file)?;
+    
+    const MAX_DECOMPRESS_SIZE: usize = 10 * 1024 * 1024; // 10MB
+    let mut buffer = vec![0u8; 64 * 1024]; // 64KB buffer
+    let mut total_written = 0;
+    let mut last_complete_record_pos = 0;
+    let mut temp_data = Vec::new();
+    let mut was_truncated = false;
+    
+    // Read and buffer data to find complete record boundaries
+    loop {
+        match decoder.read(&mut buffer) {
+            Ok(0) => break, // EOF
+            Ok(bytes_read) => {
+                if total_written + bytes_read > MAX_DECOMPRESS_SIZE {
+                    // We're approaching the limit - read what we can
+                    let remaining = MAX_DECOMPRESS_SIZE - total_written;
+                    temp_data.extend_from_slice(&buffer[..remaining.min(bytes_read)]);
+                    was_truncated = true;
+                    break;
+                } else {
+                    temp_data.extend_from_slice(&buffer[..bytes_read]);
+                    total_written += bytes_read;
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    
+    // Find the last complete record boundary to avoid truncation
+    if was_truncated {
+        match format {
+            FileFormat::Fastq => {
+                // For FASTQ, find the last complete 4-line record
+                let data_str = String::from_utf8_lossy(&temp_data);
+                let lines: Vec<&str> = data_str.lines().collect();
+                
+                // Find the last position where we have a complete FASTQ record (4 lines)
+                let complete_records = (lines.len() / 4) * 4;
+                if complete_records > 0 {
+                    // Reconstruct data up to last complete record
+                    let truncated_data = lines[..complete_records].join("\n") + "\n";
+                    temp_data = truncated_data.into_bytes();
+                    last_complete_record_pos = temp_data.len();
+                }
+            }
+            FileFormat::Fasta => {
+                // For FASTA, find the last complete record (ends at next '>' or EOF)
+                let data_str = String::from_utf8_lossy(&temp_data);
+                let mut last_header_pos = 0;
+                
+                for (i, line) in data_str.lines().enumerate() {
+                    if line.starts_with('>') {
+                        if i > 0 {
+                            // Found a new header, previous record was complete
+                            last_header_pos = data_str.lines().take(i).map(|l| l.len() + 1).sum::<usize>();
+                        }
+                    }
+                }
+                
+                if last_header_pos > 0 {
+                    temp_data.truncate(last_header_pos - 1); // -1 to remove trailing newline
+                    last_complete_record_pos = temp_data.len();
+                }
+            }
+        }
+    }
+    
+    temp_file.write_all(&temp_data)?;
     temp_file.sync_all()?;
     
-    Ok(temp_path)
+    if was_truncated {
+        eprintln!("Warning: Gzipped file '{}' exceeds 10MB limit.", gz_path.display());
+        eprintln!("Only the first ~{:.1}MB have been decompressed to avoid memory issues.", temp_data.len() as f64 / (1024.0 * 1024.0));
+        eprintln!("If you need to view the entire file, please decompress it manually with: gunzip -c '{}' > uncompressed_file", gz_path.display());
+    }
+    
+    Ok((temp_path, was_truncated))
 }
 
 // Adaptive buffer sizes based on file size
@@ -306,8 +379,8 @@ impl SequenceReader<File> {
             .unwrap_or(false);
         
         if is_gzipped {
-            // Decompress to temporary file and read from there
-            let temp_path = decompress_gz_to_temp(path)?;
+            // Decompress to temporary file and read from there (limited to 10MB)
+            let (temp_path, was_truncated) = decompress_gz_to_temp(path, format)?;
             let file = File::open(&temp_path)
                 .map_err(|e| std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -316,6 +389,12 @@ impl SequenceReader<File> {
             
             let mut reader = Self::new(file, format)?;
             reader.temp_file_path = Some(temp_path);
+            
+            // If truncated, mark total_records as known to prevent seeking beyond
+            if was_truncated {
+                reader.count_all_records()?;
+            }
+            
             Ok(reader)
         } else {
             // Handle regular files
@@ -369,6 +448,38 @@ impl<R: Read + Seek> SequenceReader<R> {
 
     pub fn format(&self) -> FileFormat {
         self.format
+    }
+
+    /// Count all records in the file and cache the total
+    fn count_all_records(&mut self) -> Result<(), std::io::Error> {
+        let original_offset = self.offset;
+        let original_buffer = self.records_buffer.clone();
+        
+        // Rewind to start and count all records
+        self.rewind()?;
+        let mut count = 0;
+        
+        loop {
+            match self.parse_next_record()? {
+                Some(_) => count += 1,
+                None => break,
+            }
+        }
+        
+        self.total_records = Some(count);
+        
+        // Restore original position
+        self.records_buffer = original_buffer;
+        self.offset = original_offset;
+        
+        // Seek back to original position
+        if original_offset > 0 {
+            self.seek_to_record(original_offset)?;
+        } else {
+            self.rewind()?;
+        }
+        
+        Ok(())
     }
 
     fn parse_next_record(&mut self) -> Result<Option<SequenceRecord>, std::io::Error> {
