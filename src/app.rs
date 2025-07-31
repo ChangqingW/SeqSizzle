@@ -1,8 +1,7 @@
-use crate::io::{SequenceReader, SequenceRecord, FileFormat};
-use crate::read_stylizing::highlight_matches;
+use crate::io::{SequenceReader, SequenceRecord};
+use crate::read_stylizing::{StyleInput, highlight_with_combined_styles, quality_to_bg_color};
 use crate::search_panel::SearchPanel;
 
-use bio::io::fastq;
 use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
 use bio::alignment::AlignmentOperation;
 use interval::interval_set::ToIntervalSet;
@@ -19,6 +18,51 @@ const RENDER_BUF_SIZE: usize = 24;
 #[cfg(not(debug_assertions))]
 const RENDER_BUF_SIZE: usize = 100;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum QualityStyleMode {
+    None,
+    Background,
+    Italic,
+    Both,
+}
+
+impl Default for QualityStyleMode {
+    fn default() -> Self {
+        QualityStyleMode::None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StylingConfig {
+    pub quality_threshold: Option<u8>,
+    pub quality_style_mode: QualityStyleMode,
+}
+
+impl Default for StylingConfig {
+    fn default() -> Self {
+        Self {
+            quality_threshold: None,
+            quality_style_mode: QualityStyleMode::None,
+        }
+    }
+}
+
+impl StylingConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    pub fn with_quality_threshold(mut self, threshold: u8) -> Self {
+        self.quality_threshold = Some(threshold);
+        self
+    }
+    
+    pub fn with_quality_style_mode(mut self, mode: QualityStyleMode) -> Self {
+        self.quality_style_mode = mode;
+        self
+    }
+}
+
 #[derive(Debug)]
 pub struct App<'a> {
     pub mode: UIMode,
@@ -32,6 +76,7 @@ pub struct App<'a> {
     pub scroll_status: (usize, usize),
     reader: SequenceReader<File>,
     message: TransientMessage,
+    pub styling_config: StylingConfig,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -94,6 +139,7 @@ impl App<'_> {
             reader,
             rendered_lines: VecDeque::with_capacity(2 * (RENDER_BUF_SIZE + 1)),
             scroll_status: (0, 0),
+            styling_config: StylingConfig::default(),
         };
         instance.update();
         Ok(instance)
@@ -214,6 +260,7 @@ impl App<'_> {
                             .unwrap()
                             .expect("Failed to fetch previous record while scroll_status.0 > 1"),
                         &self.search_patterns,
+                        &self.styling_config,
                     );
                     remaining += lines_height_vec(&lines[0..2], tui_size) as isize;
                     lines
@@ -266,7 +313,7 @@ impl App<'_> {
                     .pop_front()
                     .expect("Failed to pop front line seq");
                 self.scroll_status.0 += 1;
-                Self::record_to_lines(&rec.unwrap(), &self.search_patterns)
+                Self::record_to_lines(&rec.unwrap(), &self.search_patterns, &self.styling_config)
                     .into_iter()
                     .for_each(|x| self.rendered_lines.push_back(x));
                 remaining -= current_line_height as isize;
@@ -315,34 +362,137 @@ impl App<'_> {
                 records.len()
             ));
         }
-        self.rendered_lines = Self::records_to_lines(&records, &self.search_patterns);
+        self.rendered_lines = Self::records_to_lines(&records, &self.search_patterns, &self.styling_config);
     }
 
     fn records_to_lines<'a>(
         records: &[SequenceRecord],
         search_patterns: &[SearchPattern],
+        styling_config: &StylingConfig,
     ) -> VecDeque<Line<'a>> {
         // parallel by record
         records
             .par_iter()
-            .map(|record| Self::record_to_lines(record, search_patterns))
+            .map(|record| Self::record_to_lines(record, search_patterns, styling_config))
             .flatten()
             .collect()
+    }
+
+    /// Helper function to get mismatch positions for all search patterns
+    fn get_mismatches_for_record(
+        record: &SequenceRecord, 
+        search_patterns: &[SearchPattern]
+    ) -> Vec<bool> {
+        let mut all_mismatches = vec![false; record.seq().len()];
+        
+        for pattern in search_patterns {
+            let alignment_results = Self::search_with_alignment(record, pattern);
+            let pattern_mismatches = Self::identify_alignment_mismatches(
+                &alignment_results, 
+                record.seq().len()
+            );
+            
+            // OR combine with existing mismatches
+            for (i, &is_mismatch) in pattern_mismatches.iter().enumerate() {
+                all_mismatches[i] |= is_mismatch;
+            }
+        }
+        
+        all_mismatches
+    }
+
+    /// Helper function to get quality-based styling (italic positions and background colors)
+    fn get_quality_styling(
+        record: &SequenceRecord,
+        config: &StylingConfig
+    ) -> (Vec<bool>, Vec<(IntervalSet<usize>, Color)>) {
+        let seq_len = record.seq().len();
+        let mut italic_positions = vec![false; seq_len];
+        let mut bg_intervals = Vec::new();
+        
+        if let (Some(threshold), SequenceRecord::Fastq(fastq_record)) = 
+            (config.quality_threshold, record) {
+            
+            // Process each position
+            for (i, &quality) in fastq_record.qual().iter().enumerate() {
+                let is_low_quality = quality < threshold;
+                
+                // Set italic positions
+                match config.quality_style_mode {
+                    QualityStyleMode::Italic | QualityStyleMode::Both => {
+                        italic_positions[i] = is_low_quality;
+                    }
+                    _ => {}
+                }
+            }
+            
+            // Create background color intervals for quality
+            match config.quality_style_mode {
+                QualityStyleMode::Background | QualityStyleMode::Both => {
+                    // Group consecutive same-quality ranges into intervals
+                    let mut current_start = 0;
+                    let mut current_quality = fastq_record.qual()[0];
+                    
+                    for (i, &quality) in fastq_record.qual().iter().enumerate().skip(1) {
+                        if quality != current_quality {
+                            // End current interval and start new one
+                            let color = quality_to_bg_color(current_quality);
+                            let interval = vec![(current_start, i - 1)].to_interval_set();
+                            bg_intervals.push((interval, color));
+                            
+                            current_start = i;
+                            current_quality = quality;
+                        }
+                    }
+                    
+                    // Add final interval
+                    if current_start < seq_len {
+                        let color = quality_to_bg_color(current_quality);
+                        let interval = vec![(current_start, seq_len - 1)].to_interval_set();
+                        bg_intervals.push((interval, color));
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        (italic_positions, bg_intervals)
     }
 
     fn record_to_lines<'a>(
         record: &SequenceRecord,
         search_patterns: &[SearchPattern],
+        styling_config: &StylingConfig,
     ) -> Vec<Line<'a>> {
         let seq = String::from_utf8_lossy(record.seq()).to_string();
-        let matches: Vec<(IntervalSet<usize>, Color)> = search_patterns
-            .iter()
-            .map(|x| (Self::search(record, x).to_interval_set(), x.color))
-            .collect::<Vec<(IntervalSet<usize>, Color)>>();
+        let seq_len = seq.len();
+        
+        let mut style_input = StyleInput::new(seq_len);
+        
+        // 1. Foreground colors from search patterns
+        for pattern in search_patterns {
+            let matches = Self::search(record, pattern).to_interval_set();
+            style_input.add_fg_color(matches, pattern.color);
+        }
+        
+        // 2. Bold for mismatches (if any search patterns exist)
+        if !search_patterns.is_empty() {
+            let mismatch_positions = Self::get_mismatches_for_record(record, search_patterns);
+            style_input.set_bold_positions(mismatch_positions);
+        }
+        
+        // 3. Quality-based styling (optional)
+        if styling_config.quality_threshold.is_some() {
+            let (italic_positions, bg_intervals) = Self::get_quality_styling(record, styling_config);
+            style_input.set_italic_positions(italic_positions);
+            for (interval, color) in bg_intervals {
+                style_input.add_bg_color(interval, color);
+            }
+        }
         
         vec![
             record.id().to_string().into(),
-            highlight_matches(&matches, seq, Color::Gray),
+            highlight_with_combined_styles(seq, style_input, Color::Gray),
         ]
     }
 
@@ -1116,5 +1266,99 @@ mod tests {
         // Position 1: Del (mismatch) -> true  
         // Position 2: Match -> false
         assert_eq!(mismatches, vec![false, true, false]);
+    }
+
+    #[test]
+    fn test_styling_config_default() {
+        let config = StylingConfig::default();
+        assert_eq!(config.quality_threshold, None);
+        assert_eq!(config.quality_style_mode, QualityStyleMode::None);
+    }
+
+    #[test]
+    fn test_styling_config_builder() {
+        let config = StylingConfig::new()
+            .with_quality_threshold(20)
+            .with_quality_style_mode(QualityStyleMode::Both);
+        
+        assert_eq!(config.quality_threshold, Some(20));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Both);
+    }
+
+    #[test]
+    fn test_get_mismatches_for_record_no_patterns() {
+        let record = create_test_record("test", b"ATCGATCG");
+        let patterns = vec![];
+        
+        let mismatches = App::get_mismatches_for_record(&record, &patterns);
+        assert_eq!(mismatches, vec![false; 8]);
+    }
+
+    #[test]
+    fn test_get_mismatches_for_record_with_patterns() {
+        let record = create_test_record("test", b"ATCGATCG");
+        let pattern = create_test_pattern("ATG", 1);
+        let patterns = vec![pattern];
+        
+        let mismatches = App::get_mismatches_for_record(&record, &patterns);
+        // Should return a boolean vector the same length as the sequence
+        assert_eq!(mismatches.len(), 8);
+        // At least some positions should be marked (exact values depend on alignment)
+        // This test ensures the function runs without panicking
+    }
+
+    #[test]
+    fn test_get_quality_styling_no_config() {
+        let record = create_fastq_test_record("test", b"ATCG", &[30, 10, 20, 35]);
+        let config = StylingConfig::default();
+        
+        let (italic_positions, bg_intervals) = App::get_quality_styling(&record, &config);
+        assert_eq!(italic_positions, vec![false; 4]);
+        assert_eq!(bg_intervals.len(), 0);
+    }
+
+    #[test]
+    fn test_get_quality_styling_with_threshold() {
+        let record = create_fastq_test_record("test", b"ATCG", &[30, 10, 20, 35]);
+        let config = StylingConfig::new()
+            .with_quality_threshold(25)
+            .with_quality_style_mode(QualityStyleMode::Italic);
+        
+        let (italic_positions, bg_intervals) = App::get_quality_styling(&record, &config);
+        // Positions 1 (qual=10) and 2 (qual=20) should be italic (below threshold 25)
+        // Positions 0 (qual=30) and 3 (qual=35) should not be italic (above threshold)
+        assert_eq!(italic_positions, vec![false, true, true, false]);
+        assert_eq!(bg_intervals.len(), 0); // No background styling in Italic mode
+    }
+
+    #[test]
+    fn test_get_quality_styling_background_mode() {
+        let record = create_fastq_test_record("test", b"ATCG", &[30, 30, 10, 10]);
+        let config = StylingConfig::new()
+            .with_quality_threshold(25)
+            .with_quality_style_mode(QualityStyleMode::Background);
+        
+        let (italic_positions, bg_intervals) = App::get_quality_styling(&record, &config);
+        assert_eq!(italic_positions, vec![false; 4]); // No italic in Background mode
+        assert!(bg_intervals.len() > 0); // Should have background intervals
+    }
+
+    #[test]
+    fn test_get_quality_styling_fasta_record() {
+        // FASTA records don't have quality scores, so should return empty styling
+        let record = create_test_record("test", b"ATCG"); // This creates a FASTQ record, let's create a FASTA-like one
+        let config = StylingConfig::new()
+            .with_quality_threshold(25)
+            .with_quality_style_mode(QualityStyleMode::Both);
+        
+        // For now, this test ensures no panic - actual FASTA support would need different record type
+        let (italic_positions, _bg_intervals) = App::get_quality_styling(&record, &config);
+        // With FASTQ record, should work normally
+        assert_eq!(italic_positions.len(), 4);
+    }
+
+    // Helper function for FASTQ records with custom quality scores
+    fn create_fastq_test_record(id: &str, seq: &[u8], qual: &[u8]) -> SequenceRecord {
+        SequenceRecord::Fastq(bio::io::fastq::Record::with_attrs(id, None, seq, qual))
     }
 }

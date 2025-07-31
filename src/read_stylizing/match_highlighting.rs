@@ -7,7 +7,7 @@ use interval::IntervalSet;
 
 use gcollections::ops::set::Difference;
 
-fn format_overlap<Bound: Width + num_traits::Num, Meta: Copy>(
+pub fn format_overlap<Bound: Width + num_traits::Num, Meta: Copy>(
     intervals: &Vec<(IntervalSet<Bound>, Meta)>,
     overlap_color: Meta,
 ) -> Vec<(IntervalSet<Bound>, Meta)> {
