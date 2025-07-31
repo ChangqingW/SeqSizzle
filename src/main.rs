@@ -10,7 +10,7 @@ mod ui;
 
 use crate::control::{handle_input, SearchPatternEdit, Update};
 use anyhow::Result;
-use app::{App, SearchPattern};
+use app::{App, SearchPattern, StylingConfig, QualityStyleMode};
 use bio::io::fastq;
 use clap::{Parser, Subcommand};
 use event::{Event, EventHandler};
@@ -58,6 +58,24 @@ struct Args {
     /// Ctrl-S in the search panel to save the patterns.
     #[clap(short = 's', long = "save-patterns")]
     save_patterns_path: Option<PathBuf>,
+
+    /// Enable italic styling for low quality bases (enabled by default)
+    #[clap(long = "quality-italic", default_value = "true")]
+    quality_italic: bool,
+
+    /// Disable italic styling for low quality bases
+    #[clap(long = "no-quality-italic", conflicts_with = "quality_italic")]
+    no_quality_italic: bool,
+
+    /// Quality threshold for styling (default: 10)
+    #[clap(long = "quality-threshold", default_value = "10")]
+    quality_threshold: u8,
+
+    /// Enable background color styling based on quality scores.
+    /// You will probably have a hard time distinguishing forground colors
+    /// from background colors, so this is disabled by default.
+    #[clap(long = "quality-colors")]
+    quality_colors: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -73,6 +91,117 @@ enum Commands {
         /// Print the counts of each summarized catagory instead of the percentage
         #[clap(long)]
         counts: bool,
+    }
+}
+
+fn create_styling_config(args: &Args) -> StylingConfig {
+    // Determine if italic styling should be enabled
+    let enable_italic = if args.no_quality_italic {
+        false
+    } else {
+        args.quality_italic
+    };
+    
+    // Determine quality style mode based on arguments
+    let quality_style_mode = if args.quality_colors {
+        if enable_italic {
+            QualityStyleMode::Both
+        } else {
+            QualityStyleMode::Background
+        }
+    } else if enable_italic {
+        QualityStyleMode::Italic
+    } else {
+        QualityStyleMode::None
+    };
+    
+    // Only set threshold if we have some quality styling enabled
+    let quality_threshold = if quality_style_mode != QualityStyleMode::None {
+        Some(args.quality_threshold)
+    } else {
+        None
+    };
+    
+    StylingConfig {
+        quality_threshold,
+        quality_style_mode,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn create_test_args() -> Args {
+        Args {
+            file: PathBuf::new(),
+            patterns_path: None,
+            save_patterns_path: None,
+            adapter_3p: false,
+            adapter_5p: false,
+            quality_italic: true,
+            no_quality_italic: false,
+            quality_threshold: 10,
+            quality_colors: false,
+            command: None,
+        }
+    }
+
+    #[test]
+    fn test_styling_config_default_italic() {
+        let args = create_test_args();
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, Some(10));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Italic);
+    }
+
+    #[test]
+    fn test_styling_config_no_italic() {
+        let mut args = create_test_args();
+        args.no_quality_italic = true;
+        args.quality_italic = false;
+        
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, None);
+        assert_eq!(config.quality_style_mode, QualityStyleMode::None);
+    }
+
+    #[test]
+    fn test_styling_config_quality_colors() {
+        let mut args = create_test_args();
+        args.quality_colors = true;
+        
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, Some(10));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Both);
+    }
+
+    #[test]
+    fn test_styling_config_quality_colors_no_italic() {
+        let mut args = create_test_args();
+        args.quality_colors = true;
+        args.no_quality_italic = true;
+        args.quality_italic = false;
+        
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, Some(10));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Background);
+    }
+
+    #[test]
+    fn test_styling_config_custom_threshold() {
+        let mut args = create_test_args();
+        args.quality_threshold = 30;
+        
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, Some(30));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Italic);
     }
 }
 
@@ -112,7 +241,7 @@ fn main() -> Result<()> {
     }
 
     // add patterns from CSV file
-    if let Some(path) = args.patterns_path {
+    if let Some(ref path) = args.patterns_path {
         let err_str = "Error opening provided pattern CSV file";
         let mut reader = csv::Reader::from_path(path).expect(err_str);
         assert_eq!(
@@ -168,6 +297,12 @@ fn main() -> Result<()> {
     }
 
     let mut app = App::new(&args.file, patterns)?;
+
+    // Configure quality styling based on command line arguments
+    app.styling_config = create_styling_config(&args);
+    
+    // Refresh the display to apply the new styling configuration
+    app.update();
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(std::io::stderr());
@@ -232,6 +367,14 @@ fn main() -> Result<()> {
                     }
                     _ => panic!("ToggleFilePopup called in non-search panel mode"),
                 }
+            }
+            Update::ToggleQualityItalic => {
+                app.toggle_quality_italic();
+                app.update(); // Refresh display
+            }
+            Update::ToggleQualityBackground => {
+                app.toggle_quality_background();
+                app.update(); // Refresh display
             }
         };
 

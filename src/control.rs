@@ -15,6 +15,8 @@ pub enum Update {
     ToggleUIMode,
     ScrollViewer(isize),
     WindowResize(Size),
+    ToggleQualityItalic,
+    ToggleQualityBackground,
     Msg(String),
     Quit,
     None,
@@ -115,6 +117,20 @@ pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
                 Update::None
             }
         },
+        
+        // Toggle quality italic styling with 'i'
+        KeyEvent {
+            code: KeyCode::Char('i'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => Update::ToggleQualityItalic,
+        
+        // Toggle quality background styling with 'b'
+        KeyEvent {
+            code: KeyCode::Char('b'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => Update::ToggleQualityBackground,
         _ => Update::None,
     }
 }
