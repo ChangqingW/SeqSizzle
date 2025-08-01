@@ -11,7 +11,6 @@ mod ui;
 use crate::control::{handle_input, SearchPatternEdit, Update};
 use anyhow::Result;
 use app::{App, SearchPattern, StylingConfig, QualityStyleMode};
-use bio::io::fastq;
 use clap::{Parser, Subcommand};
 use event::{Event, EventHandler};
 use ratatui::prelude::{Color, CrosstermBackend, Terminal};
@@ -20,6 +19,8 @@ use std::path::PathBuf;
 use tui::Tui;
 
 shadow!(build);
+
+pub const DEFAULT_QUALITY_THRESHOLD: u8 = 10;
 
 /// A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.
 #[derive(Parser, Debug)]
@@ -67,8 +68,8 @@ struct Args {
     #[clap(long = "no-quality-italic", conflicts_with = "quality_italic")]
     no_quality_italic: bool,
 
-    /// Quality threshold for styling (default: 10)
-    #[clap(long = "quality-threshold", default_value = "10")]
+    /// Quality threshold for styling
+    #[clap(long = "quality-threshold", default_value_t = DEFAULT_QUALITY_THRESHOLD)]
     quality_threshold: u8,
 
     /// Enable background color styling based on quality scores.

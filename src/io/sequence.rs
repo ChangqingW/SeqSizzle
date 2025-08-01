@@ -266,7 +266,6 @@ fn decompress_gz_to_temp(gz_path: &Path, format: FileFormat) -> Result<(PathBuf,
     const MAX_DECOMPRESS_SIZE: usize = 10 * 1024 * 1024; // 10MB
     let mut buffer = vec![0u8; 64 * 1024]; // 64KB buffer
     let mut total_written = 0;
-    let mut last_complete_record_pos = 0;
     let mut temp_data = Vec::new();
     let mut was_truncated = false;
     
@@ -304,7 +303,6 @@ fn decompress_gz_to_temp(gz_path: &Path, format: FileFormat) -> Result<(PathBuf,
                     // Reconstruct data up to last complete record
                     let truncated_data = lines[..complete_records].join("\n") + "\n";
                     temp_data = truncated_data.into_bytes();
-                    last_complete_record_pos = temp_data.len();
                 }
             }
             FileFormat::Fasta => {
@@ -323,7 +321,6 @@ fn decompress_gz_to_temp(gz_path: &Path, format: FileFormat) -> Result<(PathBuf,
                 
                 if last_header_pos > 0 {
                     temp_data.truncate(last_header_pos - 1); // -1 to remove trailing newline
-                    last_complete_record_pos = temp_data.len();
                 }
             }
         }

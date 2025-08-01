@@ -54,7 +54,7 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
     }
 }
 
-fn handle_input_file_save(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
+fn handle_input_file_save(app: &App, _tui: &Tui, keyevent: KeyEvent) -> Update {
     if keyevent.code == KeyCode::Esc {
         Update::ToggleFilePopup
     } else if keyevent.code == KeyCode::Enter {
@@ -68,7 +68,7 @@ fn handle_input_file_save(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
     }
 }
 
-pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
+pub fn handle_input_viewer(_app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
     match keyevent {
         KeyEvent {
             code: KeyCode::Char('q'),
@@ -135,7 +135,7 @@ pub fn handle_input_viewer(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
     }
 }
 
-pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
+pub fn handle_input_search_panel(app: &App, _tui: &Tui, keyevent: KeyEvent) -> Update {
     if keyevent.code == KeyCode::Esc {
         Update::ToggleUIMode
 
@@ -210,6 +210,14 @@ pub fn handle_input_search_panel(app: &App, tui: &Tui, keyevent: KeyEvent) -> Up
                                        (Err(_), Err(_)) => {Update::Msg("Color needs to be valid hex code, edit distance needs to be valid positive integer".to_string())},
                 }
 
+    // if shift is pressed with an arrow key, remove the shift modifier
+    // and pass the key event to the input boxes
+    } else if keyevent.modifiers == KeyModifiers::SHIFT
+        && [KeyCode::Right, KeyCode::Left, KeyCode::Up, KeyCode::Down].contains(&keyevent.code)
+    {
+        let mut keyevent = keyevent.clone();
+        keyevent.modifiers = KeyModifiers::NONE;
+        Update::SearchPanelInput(keyevent)
     // pass to input boxes
     } else {
         Update::SearchPanelInput(keyevent)

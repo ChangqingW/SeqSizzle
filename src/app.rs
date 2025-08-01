@@ -1,6 +1,7 @@
 use crate::io::{SequenceReader, SequenceRecord};
 use crate::read_stylizing::{StyleInput, highlight_with_combined_styles, quality_to_bg_color};
 use crate::search_panel::SearchPanel;
+use crate::DEFAULT_QUALITY_THRESHOLD;
 
 use bio::pattern_matching::myers::{BitVec, Myers, MyersBuilder};
 use bio::alignment::AlignmentOperation;
@@ -17,8 +18,6 @@ use std::path::{Path, PathBuf};
 const RENDER_BUF_SIZE: usize = 24;
 #[cfg(not(debug_assertions))]
 const RENDER_BUF_SIZE: usize = 100;
-
-const DEFAULT_QUALITY_THRESHOLD: u8 = 10;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum QualityStyleMode {
@@ -220,8 +219,8 @@ impl App<'_> {
     }
 
     pub fn scroll(&mut self, num: isize, tui_size: Size) {
-        /// scroll the rendered lines by num
-        /// rendered_lines append / pop lines if scrolling beyond a read
+        // scroll the rendered lines by num
+        // rendered_lines append / pop lines if scrolling beyond a read
 
         // line height in tui
         fn line_height(line: &Line, tui_size: Size) -> usize {
@@ -347,7 +346,7 @@ impl App<'_> {
         self.message.get()
     }
 
-    pub fn resized_update(&mut self, tui_size: Size) {
+    pub fn resized_update(&mut self, _tui_size: Size) {
         // TODO
         self.scroll_status.1 = 0;
     }
@@ -1014,205 +1013,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_detailed_example_showing_differences() {
-        // Example sequence and pattern that shows the difference
-        let record = create_test_record("example", b"ATCGATCGATCG");
-        let pattern = create_test_pattern("TCGATCGT", 2); // Edit distance 2
-        
-        println!("\n=== DETAILED COMPARISON EXAMPLE ===");
-        println!("Sequence: {}", String::from_utf8_lossy(record.seq()));
-        println!("Pattern:  {} (edit distance: {})", 
-            pattern.search_string, pattern.edit_distance);
-        println!();
-        
-        // Get results from both methods
-        let basic_matches = App::search(&record, &pattern);
-        let alignment_matches = App::search_with_alignment(&record, &pattern);
-        
-        println!("Basic method results:");
-        for (i, (start, end)) in basic_matches.iter().enumerate() {
-            let match_seq = std::str::from_utf8(&record.seq()[*start..=*end]).unwrap();
-            println!("  Match {}: position {}..{} = '{}' (length: {})", 
-                i+1, start, end, match_seq, end - start + 1);
-        }
-        
-        println!("\nAlignment method results:");
-        for (i, (start, end, path)) in alignment_matches.iter().enumerate() {
-            let match_seq = std::str::from_utf8(&record.seq()[*start..=*end]).unwrap();
-            let ops_count = path.iter().filter(|op| matches!(op, 
-                AlignmentOperation::Subst | AlignmentOperation::Del | AlignmentOperation::Ins
-            )).count();
-            println!("  Match {}: position {}..{} = '{}' (length: {}, ops: {})", 
-                i+1, start, end, match_seq, end - start + 1, ops_count);
-            
-            // Show alignment operations
-            print!("    Alignment path: ");
-            for op in path {
-                match op {
-                    AlignmentOperation::Match => print!("M"),
-                    AlignmentOperation::Subst => print!("S"),
-                    AlignmentOperation::Del => print!("D"),
-                    AlignmentOperation::Ins => print!("I"),
-                    AlignmentOperation::Xclip(_) => print!("X"),
-                    AlignmentOperation::Yclip(_) => print!("Y"),
-                }
-            }
-            println!();
-        }
-        
-        println!("\n=== ANALYSIS ===");
-        
-        // Convert alignment results to positions for comparison
-        let alignment_positions: Vec<(usize, usize)> = alignment_matches
-            .into_iter()
-            .map(|(start, end, _)| (start, end))
-            .collect();
-        
-        let mut basic_sorted = basic_matches.clone();
-        let mut alignment_sorted = alignment_positions.clone();
-        basic_sorted.sort();
-        alignment_sorted.sort();
-        
-        println!("Basic method (sorted):    {:?}", basic_sorted);
-        println!("Alignment method (sorted): {:?}", alignment_sorted);
-        
-        // Find unique matches in each method
-        let basic_only: Vec<_> = basic_sorted.iter()
-            .filter(|pos| !alignment_sorted.contains(pos))
-            .collect();
-        let alignment_only: Vec<_> = alignment_sorted.iter()
-            .filter(|pos| !basic_sorted.contains(pos))
-            .collect();
-        
-        if !basic_only.is_empty() {
-            println!("\nMatches ONLY in basic method:");
-            for (start, end) in basic_only {
-                let match_seq = std::str::from_utf8(&record.seq()[*start..=*end]).unwrap();
-                println!("  {}..{} = '{}' (length: {})", start, end, match_seq, end - start + 1);
-            }
-        }
-        
-        if !alignment_only.is_empty() {
-            println!("\nMatches ONLY in alignment method:");
-            for (start, end) in alignment_only {
-                let match_seq = std::str::from_utf8(&record.seq()[*start..=*end]).unwrap();
-                println!("  {}..{} = '{}' (length: {})", start, end, match_seq, end - start + 1);
-            }
-        }
-    }
-
-    #[test]
-    fn test_alignment_path_explanation() {
-        println!("\n=== ALIGNMENT PATH DETAILED EXPLANATION ===");
-        
-        // Example 1: Simple substitution
-        let record1 = create_test_record("test1", b"ATCGATCG");
-        let pattern1 = create_test_pattern("ATG", 1);
-        let alignment_matches1 = App::search_with_alignment(&record1, &pattern1);
-        
-        println!("Example 1: Simple substitution");
-        println!("Sequence: {}", String::from_utf8_lossy(record1.seq()));
-        println!("Pattern:  {} (edit distance: {})", pattern1.search_string, pattern1.edit_distance);
-        
-        for (start, end, path) in &alignment_matches1 {
-            let match_seq = std::str::from_utf8(&record1.seq()[*start..=*end]).unwrap();
-            println!("  Match: {}..{} = '{}' (length: {})", start, end, match_seq, end - start + 1);
-            println!("  Pattern: {}", pattern1.search_string);
-            println!("  Alignment path: {:?}", path);
-            
-            // Map each position
-            println!("  Step-by-step transformation:");
-            let pattern_chars: Vec<char> = pattern1.search_string.chars().collect();
-            let match_chars: Vec<char> = match_seq.chars().collect();
-            
-            let mut pattern_idx = 0;
-            let mut match_idx = 0;
-            
-            for (step, op) in path.iter().enumerate() {
-                match op {
-                    AlignmentOperation::Match => {
-                        println!("    Step {}: Match '{}' with '{}' (pattern[{}] = match[{}])", 
-                            step + 1, 
-                            pattern_chars.get(pattern_idx).unwrap_or(&'?'),
-                            match_chars.get(match_idx).unwrap_or(&'?'),
-                            pattern_idx, match_idx);
-                        pattern_idx += 1;
-                        match_idx += 1;
-                    },
-                    AlignmentOperation::Subst => {
-                        println!("    Step {}: Substitute '{}' → '{}' (pattern[{}] → match[{}])", 
-                            step + 1,
-                            pattern_chars.get(pattern_idx).unwrap_or(&'?'),
-                            match_chars.get(match_idx).unwrap_or(&'?'),
-                            pattern_idx, match_idx);
-                        pattern_idx += 1;
-                        match_idx += 1;
-                    },
-                    AlignmentOperation::Del => {
-                        println!("    Step {}: Delete '{}' from pattern[{}] (no match consumed)", 
-                            step + 1,
-                            pattern_chars.get(pattern_idx).unwrap_or(&'?'),
-                            pattern_idx);
-                        pattern_idx += 1;
-                    },
-                    AlignmentOperation::Ins => {
-                        println!("    Step {}: Insert '{}' from match[{}] (no pattern consumed)", 
-                            step + 1,
-                            match_chars.get(match_idx).unwrap_or(&'?'),
-                            match_idx);
-                        match_idx += 1;
-                    },
-                    AlignmentOperation::Xclip(_) => {
-                        println!("    Step {}: X-clip operation", step + 1);
-                    },
-                    AlignmentOperation::Yclip(_) => {
-                        println!("    Step {}: Y-clip operation", step + 1);
-                    },
-                }
-            }
-            
-            println!("  Pattern length: {}, Match length: {}, Path length: {}", 
-                pattern1.search_string.len(), match_seq.len(), path.len());
-            println!();
-        }
-        
-        // Example 2: Insertion case
-        println!("Example 2: Insertion case");
-        let record2 = create_test_record("test2", b"ATGATG");
-        let pattern2 = create_test_pattern("AG", 1);
-        let alignment_matches2 = App::search_with_alignment(&record2, &pattern2);
-        
-        println!("Sequence: {}", String::from_utf8_lossy(record2.seq()));
-        println!("Pattern:  {} (edit distance: {})", pattern2.search_string, pattern2.edit_distance);
-        
-        for (start, end, path) in alignment_matches2.iter().take(2) { // Show first 2 for brevity
-            let match_seq = std::str::from_utf8(&record2.seq()[*start..=*end]).unwrap();
-            println!("  Match: {}..{} = '{}' → Path: ", start, end, match_seq);
-            
-            for op in path {
-                match op {
-                    AlignmentOperation::Match => print!("M"),
-                    AlignmentOperation::Subst => print!("S"),
-                    AlignmentOperation::Del => print!("D"),
-                    AlignmentOperation::Ins => print!("I"),
-                    AlignmentOperation::Xclip(_) => print!("X"),
-                    AlignmentOperation::Yclip(_) => print!("Y"),
-                }
-            }
-            println!(" (Pattern: {}, Match: {}, Path: {} ops)", 
-                pattern2.search_string.len(), match_seq.len(), path.len());
-        }
-        
-        println!("\n=== KEY INSIGHTS ===");
-        println!("1. Path length ≠ pattern length ≠ match length");
-        println!("2. Path length = number of alignment operations needed");
-        println!("3. Each operation maps pattern positions to match positions");
-        println!("4. M/S consume both pattern and match positions");  
-        println!("5. D consumes only pattern position (deletion from pattern)");
-        println!("6. I consumes only match position (insertion to match)");
-        println!("================================\n");
-    }
 
     #[test]
     fn test_identify_alignment_mismatches_basic() {

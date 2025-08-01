@@ -27,13 +27,13 @@ pub fn format_overlap<Bound: Width + num_traits::Num, Meta: Copy>(
     result
 }
 
-pub fn highlight_matches<'a, T: Width + num_traits::PrimInt>(
+pub fn highlight_matches<'a, T>(
     intervals: &Vec<(IntervalSet<T>, Color)>,
     input_string: String,
     overlap_color: Color,
 ) -> Line<'a>
 where
-    T: Into<usize>,
+    T: Width + num_traits::PrimInt + Into<usize>,
 {
     let intervals: Vec<(IntervalSet<T>, Color)> = format_overlap(intervals, overlap_color);
     let mut intervals: Vec<(usize, usize, Color)> = intervals

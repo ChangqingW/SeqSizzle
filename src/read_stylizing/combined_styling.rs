@@ -107,7 +107,7 @@ pub fn bool_vector_to_intervals(bool_vec: &[bool]) -> IntervalSet<usize> {
         match (start, is_active) {
             (None, true) => start = Some(i),
             (Some(s), false) => {
-                if s <= i - 1 {
+                if s < i {
                     intervals.push((s, i - 1));
                 }
                 start = None;

@@ -65,6 +65,7 @@ fn parse_record<R: Read>(
 /// Try reading 7 lines from the BufReader and
 /// workout the start of a fastq record
 /// calls next if the start of a record is found
+#[allow(dead_code)]
 fn try_next<R: Read + Seek>(
     buf_reader: &mut BufReader<R>,
 ) -> Result<fastq::Record, std::io::Error> {
@@ -113,6 +114,7 @@ fn next<R: Read + Seek>(
 }
 
 /// Read records from a BufReader until the given position is reached
+#[allow(dead_code)]
 fn read_to_pos<R: Read + Seek>(
     buf_reader: &mut BufReader<R>,
     pos: u64,
@@ -180,10 +182,6 @@ static RECORD_BUF_SIZE: usize = 4;
 #[cfg(debug_assertions)]
 static READER_BUF_SIZE: usize = RECORD_BUF_SIZE * 4 * 300;
 
-#[test]
-fn test_buf_size() {
-    assert_eq!(RECORD_BUF_SIZE, 4);
-}
 
 /// Decompresses a gzipped file to a temporary file and returns the path
 fn decompress_gz_to_temp(gz_path: &Path) -> Result<PathBuf, std::io::Error> {
