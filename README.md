@@ -37,6 +37,8 @@ Cargo will build the `seqsizzle` binary and place it in `$HOME/.cargo`.
 # Usage
 `./seqsizzle -h`:
 ```
+A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.
+
 Usage: seqsizzle [OPTIONS] <FILE> [COMMAND]
 
 Commands:
@@ -44,7 +46,7 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <FILE>  The FASTQ file to view
+  <FILE>  The FASTQ or FASTA file to view (supports .fastq, .fasta, .fa, .fq and their .gz variants)
 
 Options:
       --adapter-3p
@@ -64,6 +66,14 @@ Options:
           pattern,color,editdistance,comment
   -s, --save-patterns <SAVE_PATTERNS_PATH>
           Save the search panel to a CSV file before quitting. To be removed in the future since you can now hit Ctrl-S in the search panel to save the patterns
+      --quality-italic
+          Enable italic styling for low quality bases (enabled by default)
+      --no-quality-italic
+          Disable italic styling for low quality bases
+      --quality-threshold <QUALITY_THRESHOLD>
+          Quality threshold for styling [default: 10]
+      --quality-colors
+          Enable background color styling based on quality scores. You will probably have a hard time distinguishing forground colors from background colors, so this is disabled by default
   -h, --help
           Print help
   -V, --version
@@ -73,7 +83,12 @@ Options:
 ### Viewer mode
 ![Viewer mode](./img/viewer_mode.png)
 Up / down arrow (or `j` / `k`) to scroll by one line, `Ctrl+U` / `Ctrl+D` to scoll half a screen.  
-`/` (or `Ctrl+F`) to toggle search panel, `q` to quit
+`/` (or `Ctrl+F`) to toggle search panel, `q` to quit.  
+`i` to toggle **I**talics for low quality bases (threshold define by `--quality-threshold`, default 10).  
+`b` to toggle **B**ackground color styling based on quality scores  
+Viewer mode with background color styling enabled would make forground colors hard to distinguish:
+![Viewer mode with background color styling](./img/viewer_mode_background_coloring.png)
+Make sure your terminal supports 256 colors (e.g. terminal emulators like iterm2, kitty, etc.) and your font support italics and bold styles otherwise it may look less appealing.
 
 ### search panel mode
 ![Search panel mode](./img/search_panel.png)
@@ -85,10 +100,11 @@ Use **Shift +** arrow keys to move cursor within an input field (as arrow keys a
 
 # Roadmap
 ## functionality 
- * Gzip (`fastq.gz`) support  
- * Filter reads by match  
- * Counting reads with match  
+ -  [x] Gzip (`fastq.gz`) support
+ -  [x] FASTA support
+ -  [x] Styling mismatches and low quality bases
+ -  [ ] Built-in k-mer enrichment to identify primers and adaptors
+ -  [ ] Filter reads by match  
+ -  [ ] Counting reads with match  
 ## UI
- * Make elements in the search panel clickable, try implementations discussed in [ratatui repo](https://github.com/ratatui-org/ratatui/discussions/552)  
-## Misc
- * Unit tests  
+ -  [ ] Make elements in the search panel clickable, try implementations discussed in [ratatui repo](https://github.com/ratatui-org/ratatui/discussions/552)  

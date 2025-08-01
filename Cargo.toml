@@ -1,8 +1,8 @@
 [package]
 name = "seqsizzle" #https://github.com/rust-lang/cargo/issues/9778
-version = "0.1.5"
+version = "0.2.0"
 authors = ["Changqing Wang <wang.ch@wehi.edu.au>"]
-description = "A pager for viewing FASTQ files with fuzzy matching, allowing different adaptors to be colored differently"
+description = "A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently."
 readme = "README.md"
 repository = "https://github.com/ChangqingW/SeqSizzle"
 license = "AGPL-3.0-or-later"
@@ -17,7 +17,7 @@ build = "src/build.rs"
 anyhow = ">= 1.0.75"
 bio = ">= 1"
 clap = { version = ">= 4.4.18", features = ["derive"] }
-crossterm = ">= 0.27.0"
+crossterm = "0.28"
 flate2 = ">= 1.0"
 gcollections = ">= 1.5.0"
 intervallum = ">= 1.4.0"

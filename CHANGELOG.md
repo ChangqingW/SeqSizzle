@@ -2,6 +2,12 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.2.0]
+ * added FASTA file format support
+ * added gzipped file support (decompresses 10MB to a temporary file)
+ * added visual styling for sequence mismatches (bold) and FASTQ quality scores (italic/color)
+ * fixed shift+arrow key handling in search panel
+
 ## [0.1.5]
  * fixed build error (expected `Rect`, found `Size`)
  * updated summarize subcommand option to print percentages or counts
