@@ -47,15 +47,13 @@ fn parse_record<R: Read>(
                     qual.trim_end().as_bytes(),
                 )))
             } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("ID field does not start with '@': {}{}{}", id, seq, qual),
+                Err(std::io::Error::other(
+                    format!("ID field does not start with '@': {id}{seq}{qual}"),
                 ))
             }
         }
-        _ => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Error while parsing lines: {}\n{}\n{}\n", id, seq, qual),
+        _ => Err(std::io::Error::other(
+            format!("Error while parsing lines: {id}\n{seq}\n{qual}\n"),
         )),
     }
 }
@@ -77,7 +75,7 @@ fn try_next<R: Read + Seek>(
             Ok(0) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("try_parse_record EOF reached after {} lines", i),
+                    format!("try_parse_record EOF reached after {i} lines"),
                 ));
             }
             Ok(_) => lines.push((line, pos)),
@@ -162,7 +160,7 @@ fn skip_n_records<R: Read>(buf_reader: &mut BufReader<R>, n: usize) -> Result<()
             Ok(0) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("skip_n_records EOF reached after {} lines", n),
+                    format!("skip_n_records EOF reached after {n} lines"),
                 ));
             }
             Ok(_) => (),

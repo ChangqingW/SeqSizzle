@@ -19,19 +19,15 @@ const RENDER_BUF_SIZE: usize = 24;
 #[cfg(not(debug_assertions))]
 const RENDER_BUF_SIZE: usize = 100;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub enum QualityStyleMode {
+    #[default]
     None,
     Background,
     Italic,
     Both,
 }
 
-impl Default for QualityStyleMode {
-    fn default() -> Self {
-        QualityStyleMode::None
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StylingConfig {
@@ -194,7 +190,7 @@ impl App<'_> {
                 std::io::ErrorKind::NotFound => Some(String::from("File path not found")),
                 std::io::ErrorKind::PermissionDenied => Some(String::from("Permission denied")),
                 std::io::ErrorKind::AlreadyExists => Some(String::from("File already exists")),
-                _ => panic!("Unexpected error while saving search patterns: {:?}", e),
+                _ => panic!("Unexpected error while saving search patterns: {e:?}"),
             }
         } else {
             let mut writer = csv::Writer::from_writer(file.unwrap());
@@ -227,17 +223,17 @@ impl App<'_> {
             line.width().div_ceil(tui_size.width as usize - 2) // 2 boarders 1 char wide
         }
         fn lines_height_vec(lines: &[Line], tui_size: Size) -> usize {
-            return lines.iter().map(|x| line_height(x, tui_size)).sum();
+            lines.iter().map(|x| line_height(x, tui_size)).sum()
         }
         fn lines_height_vecdeque(
             lines: &VecDeque<Line>,
             indexes: &[usize],
             tui_size: Size,
         ) -> usize {
-            return indexes
+            indexes
                 .iter()
                 .map(|x| line_height(&lines[*x], tui_size))
-                .sum();
+                .sum()
         }
 
         if num == 0 {
@@ -748,7 +744,7 @@ impl App<'_> {
                         i += 1; // Skip the original next operation
                     }
                 } else {
-                    filtered_ops.push(alignment_ops[i].clone());
+                    filtered_ops.push(alignment_ops[i]);
                     i += 1;
                 }
             }
@@ -774,7 +770,7 @@ impl App<'_> {
                         match op {
                             AlignmentOperation::Match | AlignmentOperation::Subst => {
                                 if current_read_pos == relative_pos {
-                                    operations_at_pos.push(op.clone());
+                                    operations_at_pos.push(*op);
                                     break;
                                 }
                                 current_read_pos += 1;
@@ -782,7 +778,7 @@ impl App<'_> {
                             AlignmentOperation::Del => {
                                 // Deletion from pattern means read has an extra base - this is a mismatch
                                 if current_read_pos == relative_pos {
-                                    operations_at_pos.push(op.clone());
+                                    operations_at_pos.push(*op);
                                     break;
                                 }
                                 current_read_pos += 1;
@@ -974,17 +970,16 @@ mod tests {
 
             // Print debug info if they don't match
             if basic_sorted != alignment_sorted {
-                println!("Edit distance {}: basic_sorted = {:?}, alignment_sorted = {:?}", 
-                    edit_distance, basic_sorted, alignment_sorted);
+                println!("Edit distance {edit_distance}: basic_sorted = {basic_sorted:?}, alignment_sorted = {alignment_sorted:?}");
                 
                 // For now, only test edit distances 0-1 where we know they match
                 if edit_distance <= 1 {
                     assert_eq!(basic_sorted, alignment_sorted, 
-                        "Mismatch for edit distance {}", edit_distance);
+                        "Mismatch for edit distance {edit_distance}");
                 }
             } else {
                 assert_eq!(basic_sorted, alignment_sorted, 
-                    "Mismatch for edit distance {}", edit_distance);
+                    "Mismatch for edit distance {edit_distance}");
             }
         }
     }
@@ -999,7 +994,7 @@ mod tests {
         // Check that we have alignment paths
         for (start, end, alignment_path) in alignment_matches {
             assert!(!alignment_path.is_empty(), 
-                "Alignment path should not be empty for match {}..{}", start, end);
+                "Alignment path should not be empty for match {start}..{end}");
             
             // Verify that the alignment path makes sense (pattern length should be close to path length)
             let pattern_len = pattern.search_string.len();
@@ -1223,7 +1218,7 @@ mod tests {
         
         let (italic_positions, bg_intervals) = App::get_quality_styling(&record, &config);
         assert_eq!(italic_positions, vec![false; 4]); // No italic in Background mode
-        assert!(bg_intervals.len() > 0); // Should have background intervals
+        assert!(!bg_intervals.is_empty()); // Should have background intervals
     }
 
     #[test]

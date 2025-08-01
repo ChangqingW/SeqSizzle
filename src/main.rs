@@ -129,83 +129,6 @@ fn create_styling_config(args: &Args) -> StylingConfig {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    fn create_test_args() -> Args {
-        Args {
-            file: PathBuf::new(),
-            patterns_path: None,
-            save_patterns_path: None,
-            adapter_3p: false,
-            adapter_5p: false,
-            quality_italic: true,
-            no_quality_italic: false,
-            quality_threshold: 10,
-            quality_colors: false,
-            command: None,
-        }
-    }
-
-    #[test]
-    fn test_styling_config_default_italic() {
-        let args = create_test_args();
-        let config = create_styling_config(&args);
-        
-        assert_eq!(config.quality_threshold, Some(10));
-        assert_eq!(config.quality_style_mode, QualityStyleMode::Italic);
-    }
-
-    #[test]
-    fn test_styling_config_no_italic() {
-        let mut args = create_test_args();
-        args.no_quality_italic = true;
-        args.quality_italic = false;
-        
-        let config = create_styling_config(&args);
-        
-        assert_eq!(config.quality_threshold, None);
-        assert_eq!(config.quality_style_mode, QualityStyleMode::None);
-    }
-
-    #[test]
-    fn test_styling_config_quality_colors() {
-        let mut args = create_test_args();
-        args.quality_colors = true;
-        
-        let config = create_styling_config(&args);
-        
-        assert_eq!(config.quality_threshold, Some(10));
-        assert_eq!(config.quality_style_mode, QualityStyleMode::Both);
-    }
-
-    #[test]
-    fn test_styling_config_quality_colors_no_italic() {
-        let mut args = create_test_args();
-        args.quality_colors = true;
-        args.no_quality_italic = true;
-        args.quality_italic = false;
-        
-        let config = create_styling_config(&args);
-        
-        assert_eq!(config.quality_threshold, Some(10));
-        assert_eq!(config.quality_style_mode, QualityStyleMode::Background);
-    }
-
-    #[test]
-    fn test_styling_config_custom_threshold() {
-        let mut args = create_test_args();
-        args.quality_threshold = 30;
-        
-        let config = create_styling_config(&args);
-        
-        assert_eq!(config.quality_threshold, Some(30));
-        assert_eq!(config.quality_style_mode, QualityStyleMode::Italic);
-    }
-}
-
 fn main() -> Result<()> {
     if !shadow_rs::git_clean() {
         print!(
@@ -260,9 +183,8 @@ fn main() -> Result<()> {
             let comment = record.get(3).expect(err_str).parse::<String>().unwrap();
             let pattern = SearchPattern::new(
                 record.get(0).expect(err_str).to_string(),
-                color.parse::<Color>().unwrap_or_else(|_| panic!("Error parsing pattern CSV file record color: {}", color)),
-                editdistance.parse::<u8>().unwrap_or_else(|_| panic!("Error parsing pattern CSV file record editdistance: {}",
-                        editdistance)),
+                color.parse::<Color>().unwrap_or_else(|_| panic!("Error parsing pattern CSV file record color: {color}")),
+                editdistance.parse::<u8>().unwrap_or_else(|_| panic!("Error parsing pattern CSV file record editdistance: {editdistance}")),
                 comment.as_str(),
             );
             patterns.push(pattern);
@@ -405,4 +327,81 @@ fn main() -> Result<()> {
     // Exit the user interface.
     tui.exit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn create_test_args() -> Args {
+        Args {
+            file: PathBuf::new(),
+            patterns_path: None,
+            save_patterns_path: None,
+            adapter_3p: false,
+            adapter_5p: false,
+            quality_italic: true,
+            no_quality_italic: false,
+            quality_threshold: 10,
+            quality_colors: false,
+            command: None,
+        }
+    }
+
+    #[test]
+    fn test_styling_config_default_italic() {
+        let args = create_test_args();
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, Some(10));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Italic);
+    }
+
+    #[test]
+    fn test_styling_config_no_italic() {
+        let mut args = create_test_args();
+        args.no_quality_italic = true;
+        args.quality_italic = false;
+        
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, None);
+        assert_eq!(config.quality_style_mode, QualityStyleMode::None);
+    }
+
+    #[test]
+    fn test_styling_config_quality_colors() {
+        let mut args = create_test_args();
+        args.quality_colors = true;
+        
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, Some(10));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Both);
+    }
+
+    #[test]
+    fn test_styling_config_quality_colors_no_italic() {
+        let mut args = create_test_args();
+        args.quality_colors = true;
+        args.no_quality_italic = true;
+        args.quality_italic = false;
+        
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, Some(10));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Background);
+    }
+
+    #[test]
+    fn test_styling_config_custom_threshold() {
+        let mut args = create_test_args();
+        args.quality_threshold = 30;
+        
+        let config = create_styling_config(&args);
+        
+        assert_eq!(config.quality_threshold, Some(30));
+        assert_eq!(config.quality_style_mode, QualityStyleMode::Italic);
+    }
 }

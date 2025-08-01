@@ -117,12 +117,11 @@ impl PositionCache {
         let mut best_position = None;
 
         for (&cached_index, &position) in &self.positions {
-            if cached_index <= target_index {
-                if best_index.is_none() || cached_index > best_index.unwrap() {
+            if cached_index <= target_index
+                && (best_index.is_none() || cached_index > best_index.unwrap()) {
                     best_index = Some(cached_index);
                     best_position = Some(position);
                 }
-            }
         }
 
         best_index.zip(best_position)
@@ -155,14 +154,12 @@ fn parse_fastq_record<R: Read>(
                     qual.trim_end().as_bytes(),
                 )))
             } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("ID field does not start with '@': {}", id),
+                Err(std::io::Error::other(
+                    format!("ID field does not start with '@': {id}"),
                 ))
             }
         }
-        _ => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        _ => Err(std::io::Error::other(
             "Error while parsing FASTQ lines",
         )),
     }
@@ -181,7 +178,7 @@ fn parse_fasta_record<R: Read + Seek>(
             if !header.starts_with('>') {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("FASTA header doesn't start with '>': {}", header),
+                    format!("FASTA header doesn't start with '>': {header}"),
                 ));
             }
         }
@@ -237,7 +234,7 @@ fn skip_n_records<R: Read + Seek>(
                 match buf_reader.read_line(&mut String::new()) {
                     Ok(0) => return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("skip_n_records EOF reached after {} lines", n),
+                        format!("skip_n_records EOF reached after {n} lines"),
                     )),
                     Ok(_) => (),
                     Err(e) => return Err(e),
@@ -311,12 +308,11 @@ fn decompress_gz_to_temp(gz_path: &Path, format: FileFormat) -> Result<(PathBuf,
                 let mut last_header_pos = 0;
                 
                 for (i, line) in data_str.lines().enumerate() {
-                    if line.starts_with('>') {
-                        if i > 0 {
+                    if line.starts_with('>')
+                        && i > 0 {
                             // Found a new header, previous record was complete
                             last_header_pos = data_str.lines().take(i).map(|l| l.len() + 1).sum::<usize>();
                         }
-                    }
                 }
                 
                 if last_header_pos > 0 {
@@ -611,11 +607,7 @@ impl<R: Read + Seek> SequenceReader<R> {
 
         // For backward seeking or when forward seek fails, use cached positions
         if index < self.offset {
-            let target_buffer_start = if index >= self.record_buf_size / 4 {
-                index - self.record_buf_size / 4
-            } else {
-                0
-            };
+            let target_buffer_start = index.saturating_sub(self.record_buf_size / 4);
             
             self.seek_to_record(target_buffer_start)?;
             

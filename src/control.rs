@@ -215,7 +215,7 @@ pub fn handle_input_search_panel(app: &App, _tui: &Tui, keyevent: KeyEvent) -> U
     } else if keyevent.modifiers == KeyModifiers::SHIFT
         && [KeyCode::Right, KeyCode::Left, KeyCode::Up, KeyCode::Down].contains(&keyevent.code)
     {
-        let mut keyevent = keyevent.clone();
+        let mut keyevent = keyevent;
         keyevent.modifiers = KeyModifiers::NONE;
         Update::SearchPanelInput(keyevent)
     // pass to input boxes

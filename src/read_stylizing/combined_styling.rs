@@ -3,23 +3,12 @@ use interval::{IntervalSet, interval_set::ToIntervalSet};
 use gcollections::ops::Bounded;
 use crate::read_stylizing::match_highlighting::format_overlap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CombinedStyle {
     pub fg_color: Option<Color>,
     pub bg_color: Option<Color>,
     pub bold: bool,
     pub italic: bool,
-}
-
-impl Default for CombinedStyle {
-    fn default() -> Self {
-        Self {
-            fg_color: None,
-            bg_color: None,
-            bold: false,
-            italic: false,
-        }
-    }
 }
 
 impl CombinedStyle {
