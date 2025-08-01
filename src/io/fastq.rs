@@ -47,15 +47,13 @@ fn parse_record<R: Read>(
                     qual.trim_end().as_bytes(),
                 )))
             } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("ID field does not start with '@': {}{}{}", id, seq, qual),
+                Err(std::io::Error::other(
+                    format!("ID field does not start with '@': {id}{seq}{qual}"),
                 ))
             }
         }
-        _ => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Error while parsing lines: {}\n{}\n{}\n", id, seq, qual),
+        _ => Err(std::io::Error::other(
+            format!("Error while parsing lines: {id}\n{seq}\n{qual}\n"),
         )),
     }
 }
@@ -65,6 +63,7 @@ fn parse_record<R: Read>(
 /// Try reading 7 lines from the BufReader and
 /// workout the start of a fastq record
 /// calls next if the start of a record is found
+#[allow(dead_code)]
 fn try_next<R: Read + Seek>(
     buf_reader: &mut BufReader<R>,
 ) -> Result<fastq::Record, std::io::Error> {
@@ -76,7 +75,7 @@ fn try_next<R: Read + Seek>(
             Ok(0) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("try_parse_record EOF reached after {} lines", i),
+                    format!("try_parse_record EOF reached after {i} lines"),
                 ));
             }
             Ok(_) => lines.push((line, pos)),
@@ -113,6 +112,7 @@ fn next<R: Read + Seek>(
 }
 
 /// Read records from a BufReader until the given position is reached
+#[allow(dead_code)]
 fn read_to_pos<R: Read + Seek>(
     buf_reader: &mut BufReader<R>,
     pos: u64,
@@ -160,7 +160,7 @@ fn skip_n_records<R: Read>(buf_reader: &mut BufReader<R>, n: usize) -> Result<()
             Ok(0) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("skip_n_records EOF reached after {} lines", n),
+                    format!("skip_n_records EOF reached after {n} lines"),
                 ));
             }
             Ok(_) => (),
@@ -180,10 +180,6 @@ static RECORD_BUF_SIZE: usize = 4;
 #[cfg(debug_assertions)]
 static READER_BUF_SIZE: usize = RECORD_BUF_SIZE * 4 * 300;
 
-#[test]
-fn test_buf_size() {
-    assert_eq!(RECORD_BUF_SIZE, 4);
-}
 
 /// Decompresses a gzipped file to a temporary file and returns the path
 fn decompress_gz_to_temp(gz_path: &Path) -> Result<PathBuf, std::io::Error> {

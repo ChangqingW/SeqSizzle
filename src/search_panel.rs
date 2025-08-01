@@ -2,7 +2,6 @@ use crate::app::SearchPattern;
 use crossterm::event::KeyEvent;
 use ratatui::layout::Alignment;
 use ratatui::prelude::{Buffer, Constraint, Direction, Layout, Line, Modifier, Rect, Span, Style};
-use ratatui::widgets::block::title::{Position, Title};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, StatefulWidget, Widget};
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -156,11 +155,11 @@ impl<'a> FocusableElement<'a, TextArea<'a>> {
     /// render the element with the focused block if focused is true
     fn render(&self, area: Rect, buf: &mut Buffer, focused: bool) {
         if !focused {
-            self.element.widget().render(area, buf);
+            self.element.render(area, buf);
         } else {
             let mut cloned = self.element.clone();
             cloned.set_block(self.focused_block.clone());
-            cloned.widget().render(area, buf);
+            cloned.render(area, buf);
         }
     }
 
@@ -343,9 +342,8 @@ impl<'a> SearchPanel<'a> {
             Block::default()
                 .borders(Borders::ALL)
                 .title("Save patterns as CSV to ...")
-                .title(
-                    Title::from("Esc to cancel; Enter to save")
-                        .position(Position::Bottom)
+                .title_bottom(
+                    Line::from("Esc to cancel; Enter to save")
                         .alignment(Alignment::Right),
                 ),
         );
@@ -443,8 +441,8 @@ impl<'a> SearchPanel<'a> {
     }
 
     /// Re-export widget method for rendering the file save popup
-    pub fn file_save_popup_widget(&self) -> impl Widget + '_ {
-        self.file_save_popup.widget()
+    pub fn file_save_popup_widget(&self) -> &tui_textarea::TextArea<'_> {
+        &self.file_save_popup
     }
 }
 

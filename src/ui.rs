@@ -4,7 +4,6 @@ use crate::app::{App, UIMode};
 use ratatui::{
     prelude::{Color, Constraint, Direction, Frame, Layout, Line, Rect, Span, Style},
     widgets::{
-        block::title::{Position, Title},
         Block, Borders, Clear, Paragraph, Wrap,
     },
 };
@@ -14,9 +13,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Some(msg) => Block::default()
             .borders(Borders::ALL)
             .title(app.file.to_str().unwrap_or("SeqSizzle"))
-            .title(
-                Title::from(Span::styled(msg, Style::default().fg(Color::Red)))
-                    .position(Position::Bottom),
+            .title_bottom(
+                Line::from(Span::styled(msg, Style::default().fg(Color::Red)))
             ),
         None => Block::default()
             .borders(Borders::ALL)
@@ -33,14 +31,14 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .block(viewer_block)
         .wrap(Wrap { trim: false })
         .scroll((app.scroll_status.1 as u16, 0)),
-        frame.size(),
+        frame.area(),
     );
     if let UIMode::SearchPanel(save_file_popup) = app.mode {
-        let center_area = centered_rect(80, 80, frame.size());
+        let center_area = centered_rect(80, 80, frame.area());
         frame.render_widget(Clear, center_area);
         frame.render_widget(&app.search_panel, center_area);
         if save_file_popup {
-            let save_file_popup_area = centered_rect(80, 5, frame.size());
+            let save_file_popup_area = centered_rect(80, 5, frame.area());
             frame.render_widget(Clear, save_file_popup_area);
             frame.render_widget(app.search_panel.file_save_popup_widget() , save_file_popup_area);
         }

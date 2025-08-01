@@ -1,8 +1,10 @@
 use crate::app::{App, SearchPattern};
 use crate::io::SequenceRecord;
-use ratatui::prelude::Color;
 use std::collections::HashMap;
 use std::collections::VecDeque;
+
+#[cfg(test)]
+use ratatui::prelude::Color;
 
 #[derive(PartialEq, Eq, Clone, Hash)]
 pub enum ReadParts {
@@ -93,7 +95,7 @@ fn test_categorise_read() {
         match i {
             ReadParts::Match(x) => result.push_str(x.search_string.as_str()),
             ReadParts::Space => result.push_str(".."),
-            ReadParts::NegativeSpace => result.push_str("-"),
+            ReadParts::NegativeSpace => result.push('-'),
         }
     }
     assert_eq!(

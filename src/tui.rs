@@ -48,7 +48,7 @@ impl Tui {
     /// [`rendering`]: crate::ui:render
     pub fn draw(&mut self, app: &mut App) -> Result<()> {
         if app.rendered_lines.is_empty() {
-            panic!("No lines in app.line_buf!\n{:?}", app)
+            panic!("No lines in app.line_buf!\n{app:?}")
         }
         self.terminal.draw(|frame| render(app, frame))?;
         Ok(())
