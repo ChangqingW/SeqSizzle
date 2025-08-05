@@ -6,9 +6,11 @@ pub mod read_stylizing;
 pub mod search_panel;
 pub mod tui;
 pub mod match_summarizing;
+pub mod kmer;
 mod ui;
 
 use crate::control::{handle_input, SearchPatternEdit, Update};
+use crate::kmer::KmerEnrichmentArgs;
 use anyhow::Result;
 use app::{App, SearchPattern, StylingConfig, QualityStyleMode};
 use clap::{Parser, Subcommand};
@@ -92,7 +94,9 @@ enum Commands {
         /// Print the counts of each summarized catagory instead of the percentage
         #[clap(long)]
         counts: bool,
-    }
+    },
+    /// Find enriched k-mers in the reads. This can be used to identify potential adapter/primer sequences.
+    Enrich(KmerEnrichmentArgs),
 }
 
 fn create_styling_config(args: &Args) -> StylingConfig {
@@ -215,8 +219,11 @@ fn main() -> Result<()> {
                     ), counts)
                 );
             }
+            Commands::Enrich(enrich_args) => {
+                kmer::run(&args.file, &enrich_args)?;
+            }
         }
-        return Ok(());
+        return Ok(())
     }
 
     let mut app = App::new(&args.file, patterns)?;
