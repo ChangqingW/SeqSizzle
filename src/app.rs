@@ -754,7 +754,7 @@ impl App<'_> {
         
         // Step 3: Pileup operations and identify mismatches
         // For each position in the read sequence, collect all operations that cover it
-        for pos in 0..read_size {
+        for (pos, mismatch_mark) in mismatch_marks.iter_mut().enumerate().take(read_size) {
             let mut operations_at_pos = Vec::new();
             
             // Find all alignment operations that cover this position
@@ -806,7 +806,7 @@ impl App<'_> {
                 let all_non_matches = operations_at_pos.iter().all(|op| {
                     !matches!(op, AlignmentOperation::Match)
                 });
-                mismatch_marks[pos] = all_non_matches;
+                *mismatch_mark = all_non_matches;
             }
             // If no operations cover this position, leave as false (no mismatch marking)
         }
@@ -1012,14 +1012,11 @@ mod tests {
     #[test]
     fn test_identify_alignment_mismatches_basic() {
         // Test basic functionality with simple alignment results
-        let mut alignment_results = Vec::new();
-        
-        // Create a simple alignment: position 0-2 with Match, Subst, Match operations
-        alignment_results.push((0, 2, vec![
+        let alignment_results = vec![(0, 2, vec![
             AlignmentOperation::Match,
             AlignmentOperation::Subst,
             AlignmentOperation::Match,
-        ]));
+        ])];
         
         let read_size = 5;
         let mismatches = App::identify_alignment_mismatches(&alignment_results, read_size);
@@ -1035,14 +1032,11 @@ mod tests {
     #[test]
     fn test_identify_alignment_mismatches_with_insertions() {
         // Test removal of insertion operations and replacement with Subst
-        let mut alignment_results = Vec::new();
-        
-        // Create alignment with insertion: Match, Ins, Match -> should become Match, Subst
-        alignment_results.push((0, 1, vec![
+        let alignment_results = vec![(0, 1, vec![
             AlignmentOperation::Match,
             AlignmentOperation::Ins,
             AlignmentOperation::Match,
-        ]));
+        ])];
         
         let read_size = 3;
         let mismatches = App::identify_alignment_mismatches(&alignment_results, read_size);
@@ -1055,21 +1049,18 @@ mod tests {
     #[test]
     fn test_identify_alignment_mismatches_multiple_alignments() {
         // Test pileup behavior with multiple overlapping alignments
-        let mut alignment_results = Vec::new();
-        
-        // First alignment covers positions 0-2 with all matches
-        alignment_results.push((0, 2, vec![
-            AlignmentOperation::Match,
-            AlignmentOperation::Match,
-            AlignmentOperation::Match,
-        ]));
-        
-        // Second alignment covers positions 1-3 with match, subst, match
-        alignment_results.push((1, 3, vec![
-            AlignmentOperation::Match,
-            AlignmentOperation::Subst,
-            AlignmentOperation::Match,
-        ]));
+        let alignment_results = vec![
+            (0, 2, vec![
+                AlignmentOperation::Match,
+                AlignmentOperation::Match,
+                AlignmentOperation::Match,
+            ]),
+            (1, 3, vec![
+                AlignmentOperation::Match,
+                AlignmentOperation::Subst,
+                AlignmentOperation::Match,
+            ]),
+        ];
         
         let read_size = 4;
         let mismatches = App::identify_alignment_mismatches(&alignment_results, read_size);
@@ -1084,20 +1075,18 @@ mod tests {
     #[test]
     fn test_identify_alignment_mismatches_all_mismatches() {
         // Test case where all alignments at a position are mismatches
-        let mut alignment_results = Vec::new();
-        
-        // Two alignments both have substitutions at position 1
-        alignment_results.push((0, 2, vec![
-            AlignmentOperation::Match,
-            AlignmentOperation::Subst,
-            AlignmentOperation::Match,
-        ]));
-        
-        alignment_results.push((1, 3, vec![
-            AlignmentOperation::Subst,
-            AlignmentOperation::Subst,
-            AlignmentOperation::Match,
-        ]));
+        let alignment_results = vec![
+            (0, 2, vec![
+                AlignmentOperation::Match,
+                AlignmentOperation::Subst,
+                AlignmentOperation::Match,
+            ]),
+            (1, 3, vec![
+                AlignmentOperation::Subst,
+                AlignmentOperation::Subst,
+                AlignmentOperation::Match,
+            ]),
+        ];
         
         let read_size = 4;
         let mismatches = App::identify_alignment_mismatches(&alignment_results, read_size);
@@ -1123,15 +1112,11 @@ mod tests {
     #[test]
     fn test_identify_alignment_mismatches_with_deletions() {
         // Test alignment with deletion operations
-        let mut alignment_results = Vec::new();
-        
-        // Alignment with deletion: Match, Del, Match
-        // Del means deletion from pattern, so read has an extra base - should be marked as mismatch
-        alignment_results.push((0, 2, vec![
+        let alignment_results = vec![(0, 2, vec![
             AlignmentOperation::Match,
             AlignmentOperation::Del,
             AlignmentOperation::Match,
-        ]));
+        ])];
         
         let read_size = 3;
         let mismatches = App::identify_alignment_mismatches(&alignment_results, read_size);

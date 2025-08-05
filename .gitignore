@@ -1,4 +1,6 @@
 /target
 .idea/
-*.fq
-*.fastq
+test_data/
+perf.data
+perf.data.old
+flamegraph.svg

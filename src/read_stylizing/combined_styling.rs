@@ -138,8 +138,8 @@ pub fn highlight_with_combined_styles<'a>(
         for interval in intervals.iter() {
             let start: usize = interval.lower();
             let end: usize = interval.upper();
-            for pos in start..=end.min(text_len - 1) {
-                position_styles[pos].fg_color = Some(color);
+            for style in position_styles.iter_mut().take(end.min(text_len - 1) + 1).skip(start) {
+                style.fg_color = Some(color);
             }
         }
     }
@@ -149,8 +149,8 @@ pub fn highlight_with_combined_styles<'a>(
         for interval in intervals.iter() {
             let start: usize = interval.lower();
             let end: usize = interval.upper();
-            for pos in start..=end.min(text_len - 1) {
-                position_styles[pos].bg_color = Some(*color);
+            for style in position_styles.iter_mut().take(end.min(text_len - 1) + 1).skip(start) {
+                style.bg_color = Some(*color);
             }
         }
     }

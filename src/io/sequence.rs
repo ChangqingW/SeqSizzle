@@ -452,11 +452,8 @@ impl<R: Read + Seek> SequenceReader<R> {
         self.rewind()?;
         let mut count = 0;
         
-        loop {
-            match self.parse_next_record()? {
-                Some(_) => count += 1,
-                None => break,
-            }
+        while self.parse_next_record()?.is_some() {
+            count += 1;
         }
         
         self.total_records = Some(count);
