@@ -22,21 +22,45 @@ fn reverse_complement(seq: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// Merge reverse complement k-mers by combining their counts
-/// Always keeps the lexicographically smaller sequence as the representative
-fn merge_reverse_complements(kmer_counts: HashMap<Vec<u8>, u64>) -> HashMap<Vec<u8>, u64> {
-    let mut merged = HashMap::new();
-    
-    for (kmer, count) in kmer_counts {
-        let rev_comp = reverse_complement(&kmer);
-        
-        // Choose the lexicographically smaller sequence as the canonical form
-        let canonical = if kmer <= rev_comp { kmer } else { rev_comp };
-        
-        *merged.entry(canonical).or_insert(0) += count;
+/// Result of merging sequences with their reverse complements
+#[derive(Debug, Clone)]
+pub struct MergeResult {
+    pub sequence: Vec<u8>,
+    pub total_count: u64,
+    pub forward_count: Option<u64>,  // Some if merged, None if single
+    pub reverse_count: Option<u64>,  // Some if merged, None if single
+}
+
+impl MergeResult {
+    /// Create a result for a single sequence (not merged)
+    fn single(sequence: Vec<u8>, count: u64) -> Self {
+        Self {
+            sequence,
+            total_count: count,
+            forward_count: None,
+            reverse_count: None,
+        }
     }
     
-    merged
+    /// Create a result for merged sequences
+    fn merged(sequence: Vec<u8>, forward_count: u64, reverse_count: u64) -> Self {
+        Self {
+            sequence,
+            total_count: forward_count + reverse_count,
+            forward_count: Some(forward_count),
+            reverse_count: Some(reverse_count),
+        }
+    }
+    
+    /// Format the count for display
+    pub fn format_count(&self) -> String {
+        match (self.forward_count, self.reverse_count) {
+            (Some(forward), Some(reverse)) => {
+                format!("{} (+{}-{})", self.total_count, forward, reverse)
+            }
+            _ => self.total_count.to_string(),
+        }
+    }
 }
 
 /// Apply a configuration preset to modify the arguments
@@ -260,7 +284,7 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
         };
         println!("Found {} {k}-mers above threshold", kmer_counts.len());
         
-        let selected_kmers = select_top_kmers(kmer_counts, k, config.top_kmers, config.detect_reverse_complement);
+        let selected_kmers = select_top_kmers(kmer_counts, k, config.top_kmers);
         enriched_kmers.insert(k, selected_kmers);
     }
 
@@ -277,7 +301,22 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
         assembled_sequences = assemble_kmers(enriched_k_max, k_max);
     }
 
-    write_report(&config.output_path, &enriched_kmers, &assembled_sequences, k_min, k_max)?;
+    // Phase 5: Optional post-assembly reverse complement merging
+    let assembled_results = if config.detect_reverse_complement {
+        println!("Phase 5: Merging reverse complement sequences...");
+        let original_count = assembled_sequences.len();
+        let merged_results = merge_sequences_with_rc(assembled_sequences, true);
+        let merged_count = merged_results.len();
+        if original_count != merged_count {
+            println!("  Merged {} sequences to {} after reverse complement consolidation", 
+                original_count, merged_count);
+        }
+        merged_results
+    } else {
+        merge_sequences_with_rc(assembled_sequences, false)
+    };
+
+    write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement)?;
     println!("Analysis complete. Results written to {}", config.output_path.display());
 
     Ok(())
@@ -341,16 +380,10 @@ fn count_kmers_with_zscore(
 
 /// Select top k-mers with balanced approach for homopolymers
 fn select_top_kmers(
-    mut kmer_counts: HashMap<Vec<u8>, u64>, 
+    kmer_counts: HashMap<Vec<u8>, u64>, 
     k: usize, 
     top_n: usize,
-    detect_reverse_complement: bool,
 ) -> HashMap<Vec<u8>, u64> {
-    // Merge reverse complement counts if requested
-    if detect_reverse_complement {
-        kmer_counts = merge_reverse_complements(kmer_counts);
-    }
-    
     let initial_count = kmer_counts.len();
     
     if initial_count <= top_n {
@@ -471,6 +504,83 @@ fn filter_substrings(
 
 fn is_substring(sub: &[u8], main: &[u8]) -> bool {
     main.windows(sub.len()).any(|window| window == sub)
+}
+
+/// Check if a k-mer is a substring of any assembled sequence or their reverse complements
+/// This is needed when reverse complement merging has been applied to assembled sequences
+fn is_substring_of_assembled_sequences(
+    kmer: &[u8], 
+    assembled_results: &HashMap<Vec<u8>, MergeResult>,
+    check_reverse_complement: bool
+) -> bool {
+    for merge_result in assembled_results.values() {
+        // Check forward direction
+        if is_substring(kmer, &merge_result.sequence) {
+            return true;
+        }
+        
+        // Check reverse complement direction if requested
+        if check_reverse_complement {
+            let rc = reverse_complement(&merge_result.sequence);
+            if is_substring(kmer, &rc) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Generic function to merge sequences with their reverse complements
+/// Works for both k-mers and assembled sequences
+fn merge_sequences_with_rc(
+    sequences: HashMap<Vec<u8>, u64>,
+    enable_merging: bool,
+) -> HashMap<Vec<u8>, MergeResult> {
+    let mut results = HashMap::new();
+    
+    if !enable_merging {
+        // No RC merging, convert to single results
+        for (seq, count) in sequences {
+            results.insert(seq.clone(), MergeResult::single(seq, count));
+        }
+        return results;
+    }
+    
+    let mut processed = std::collections::HashSet::new();
+    
+    for (seq, count) in &sequences {
+        if processed.contains(seq) {
+            continue;
+        }
+        
+        let rev_comp = reverse_complement(seq);
+        
+        // Check if we've already seen the reverse complement
+        if let Some(rc_count) = sequences.get(&rev_comp) {
+            if !processed.contains(&rev_comp) && seq != &rev_comp {
+                // Choose the lexicographically smaller sequence as canonical
+                let (canonical, forward_count, reverse_count) = if seq <= &rev_comp {
+                    (seq.clone(), *count, *rc_count)
+                } else {
+                    (rev_comp.clone(), *rc_count, *count)
+                };
+                
+                results.insert(
+                    canonical.clone(),
+                    MergeResult::merged(canonical, forward_count, reverse_count),
+                );
+                
+                processed.insert(seq.clone());
+                processed.insert(rev_comp);
+            }
+        } else {
+            // No reverse complement found, or it's a palindrome
+            results.insert(seq.clone(), MergeResult::single(seq.clone(), *count));
+            processed.insert(seq.clone());
+        }
+    }
+    
+    results
 }
 
 fn assemble_kmers(
@@ -610,58 +720,94 @@ fn assemble_kmers(
     assembled_sequences
 }
 
+fn merge_kmers_with_rc(
+    enriched_kmers: &HashMap<Vec<u8>, u64>,
+    rc_merging_applied: bool,
+) -> Vec<(String, usize, String, String)> {
+    let merged_results = merge_sequences_with_rc(enriched_kmers.clone(), rc_merging_applied);
+    
+    let mut results = Vec::new();
+    for (_, merge_result) in merged_results {
+        results.push((
+            String::from_utf8_lossy(&merge_result.sequence).into_owned(),
+            merge_result.sequence.len(),
+            merge_result.format_count(),
+            "".to_string(), // source_k will be filled by caller
+        ));
+    }
+    
+    results
+}
+
 fn write_report(
     output_path: &Path,
     enriched_kmers: &HashMap<usize, HashMap<Vec<u8>, u64>>,
-    assembled_sequences: &HashMap<Vec<u8>, u64>,
+    assembled_results: &HashMap<Vec<u8>, MergeResult>,
     k_min: usize,
     k_max: usize,
+    rc_merging_applied: bool,
 ) -> Result<()> {
     let mut all_results = Vec::new();
 
-    for (seq, count) in assembled_sequences.iter() {
+    // Handle assembled sequences with consistent formatting
+    for merge_result in assembled_results.values() {
         all_results.push((
-            String::from_utf8_lossy(seq).into_owned(),
-            seq.len(),
-            *count,
+            String::from_utf8_lossy(&merge_result.sequence).into_owned(),
+            merge_result.sequence.len(),
+            merge_result.format_count(),
             format!("assembled from k={k_max}"),
         ));
     }
 
+    // Handle k-mers from k_max, with RC merging if applicable
     if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
-        for (kmer, count) in enriched_k_max.iter() {
-            if !assembled_sequences.keys().any(|ak| is_substring(kmer, ak)) {
-                all_results.push((
-                    String::from_utf8_lossy(kmer).into_owned(),
-                    kmer.len(),
-                    *count,
-                    k_max.to_string(),
-                ));
-            }
+        let mut kmer_results = merge_kmers_with_rc(enriched_k_max, rc_merging_applied);
+        
+        // Filter out k-mers that are substrings of assembled sequences
+        kmer_results.retain(|(kmer_str, _, _, _)| {
+            let kmer = kmer_str.as_bytes();
+            !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
+        });
+        
+        // Set the source_k for these results
+        for (_, _, _, source_k) in kmer_results.iter_mut() {
+            *source_k = k_max.to_string();
         }
+        
+        all_results.extend(kmer_results);
     }
 
+    // Handle k-mers from smaller k values, with RC merging if applicable
     for k in (k_min..k_max).rev() {
         if let Some(enriched_k) = enriched_kmers.get(&k) {
-            for (kmer, count) in enriched_k.iter() {
-                if !assembled_sequences.keys().any(|ak| is_substring(kmer, ak)) {
-                    all_results.push((
-                        String::from_utf8_lossy(kmer).into_owned(),
-                        kmer.len(),
-                        *count,
-                        k.to_string(),
-                    ));
-                }
+            let mut kmer_results = merge_kmers_with_rc(enriched_k, rc_merging_applied);
+            
+            // Filter out k-mers that are substrings of assembled sequences
+            kmer_results.retain(|(kmer_str, _, _, _)| {
+                let kmer = kmer_str.as_bytes();
+                !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
+            });
+            
+            // Set the source_k for these results
+            for (_, _, _, source_k) in kmer_results.iter_mut() {
+                *source_k = k.to_string();
             }
+            
+            all_results.extend(kmer_results);
         }
     }
 
-    all_results.sort_by(|a, b| b.2.cmp(&a.2));
+    // Sort by count (extract numeric part for comparison)
+    all_results.sort_by(|a, b| {
+        let count_a = a.2.split_whitespace().next().unwrap_or("0").parse::<u64>().unwrap_or(0);
+        let count_b = b.2.split_whitespace().next().unwrap_or("0").parse::<u64>().unwrap_or(0);
+        count_b.cmp(&count_a)
+    });
 
     let mut writer = csv::Writer::from_path(output_path)?;
     writer.write_record(["sequence", "length", "estimated_count", "source_k"])?;
     for (sequence, length, count, source_k) in all_results {
-        writer.write_record(&[sequence, length.to_string(), count.to_string(), source_k])?;
+        writer.write_record(&[sequence, length.to_string(), count, source_k])?;
     }
     writer.flush()?;
     Ok(())
