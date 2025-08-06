@@ -1,13 +1,80 @@
 use crate::io::{SequenceReader, SequenceRecord};
 use anyhow::Result;
-use clap::Parser;
+use clap::Args;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::ops::Range;
 
 const SUBSTRING_COUNT_RATIO_THRESHOLD: f64 = 0.8; // Threshold for substring filtering
 
-#[derive(Debug, Parser)]
+/// Compute the reverse complement of a DNA sequence
+fn reverse_complement(seq: &[u8]) -> Vec<u8> {
+    seq.iter()
+        .rev()
+        .map(|&base| match base.to_ascii_uppercase() {
+            b'A' => b'T',
+            b'T' => b'A',
+            b'G' => b'C',
+            b'C' => b'G',
+            _ => base, // Keep ambiguous bases as-is
+        })
+        .collect()
+}
+
+/// Merge reverse complement k-mers by combining their counts
+/// Always keeps the lexicographically smaller sequence as the representative
+fn merge_reverse_complements(kmer_counts: HashMap<Vec<u8>, u64>) -> HashMap<Vec<u8>, u64> {
+    let mut merged = HashMap::new();
+    
+    for (kmer, count) in kmer_counts {
+        let rev_comp = reverse_complement(&kmer);
+        
+        // Choose the lexicographically smaller sequence as the canonical form
+        let canonical = if kmer <= rev_comp { kmer } else { rev_comp };
+        
+        *merged.entry(canonical).or_insert(0) += count;
+    }
+    
+    merged
+}
+
+/// Apply a configuration preset to modify the arguments
+fn apply_preset(args: &mut KmerEnrichmentArgs, preset: &str) -> Result<()> {
+    match preset.to_lowercase().as_str() {
+        "quick" => {
+            // Fast analysis: larger k-step, fewer k-mers
+            if args.k_step == 1 { args.k_step = 2; }  // Only override if not explicitly set
+            if args.top_kmers == 200 { args.top_kmers = 100; }
+            println!("Applied 'quick' preset: k-step={}, top-kmers={}", args.k_step, args.top_kmers);
+        },
+        "sensitive" => {
+            // Comprehensive analysis: k-step=1, more k-mers
+            args.k_step = 1;
+            if args.top_kmers == 200 { args.top_kmers = 500; }
+            args.detect_reverse_complement = true;
+            println!("Applied 'sensitive' preset: k-step={}, top-kmers={}, reverse-complement=true", 
+                args.k_step, args.top_kmers);
+        },
+        "memory-efficient" => {
+            // Low memory usage: larger k-step, fewer k-mers, smaller k-range
+            if args.k_step == 1 { args.k_step = 3; }
+            if args.top_kmers == 200 { args.top_kmers = 50; }
+            if args.k_max == 25 { args.k_max = 20; }  // Reduce max k
+            println!("Applied 'memory-efficient' preset: k-step={}, top-kmers={}, k-max={}", 
+                args.k_step, args.top_kmers, args.k_max);
+        },
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unknown preset '{}'. Available presets: quick, sensitive, memory-efficient", 
+                preset
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Args, Clone)]
 pub struct KmerEnrichmentArgs {
     /// Path to write the output CSV file.
     #[clap(short, long)]
@@ -21,6 +88,10 @@ pub struct KmerEnrichmentArgs {
     #[clap(long, default_value_t = 25)]
     pub k_max: usize,
 
+    /// Step size between k-values (arithmetic progression).
+    #[clap(long, default_value_t = 1)]
+    pub k_step: usize,
+
     /// Number of top k-mers to keep per k value.
     #[clap(long, default_value_t = 200)]
     pub top_kmers: usize,
@@ -32,20 +103,137 @@ pub struct KmerEnrichmentArgs {
     /// Z-score threshold for k-mer enrichment (default: 5.0).
     #[clap(long, default_value_t = 5.0)]
     pub z_score_threshold: f64,
+
+    /// Detect and merge reverse complement k-mers.
+    #[clap(long)]
+    pub detect_reverse_complement: bool,
+
+    /// Use a predefined parameter preset (quick, sensitive, memory-efficient).
+    #[clap(long)]
+    pub preset: Option<String>,
+}
+
+/// Configuration struct for centralized parameter management
+#[derive(Debug, Clone)]
+pub struct KmerConfig {
+    pub k_range: Range<usize>,
+    pub k_step: usize,
+    pub top_kmers: usize,
+    pub z_score_threshold: f64,
+    pub min_count: Option<u64>,
+    pub output_path: PathBuf,
+    pub detect_reverse_complement: bool,
+}
+
+impl KmerConfig {
+    /// Create a new configuration from CLI arguments
+    pub fn from_args(args: &KmerEnrichmentArgs) -> Result<Self> {
+        // Apply preset if specified
+        let mut args = args.clone();
+        if let Some(preset) = &args.preset.clone() {
+            apply_preset(&mut args, preset)?;
+        }
+        
+        // Validate arguments after preset application
+        validate_args(&args)?;
+        
+        let output_path = if args.output.is_absolute() {
+            args.output.clone()
+        } else {
+            std::env::current_dir()?.join(&args.output)
+        };
+        
+        Ok(KmerConfig {
+            k_range: args.k_min..args.k_max + 1,
+            k_step: args.k_step,
+            top_kmers: args.top_kmers,
+            z_score_threshold: args.z_score_threshold,
+            min_count: args.min_count,
+            output_path,
+            detect_reverse_complement: args.detect_reverse_complement,
+        })
+    }
+    
+    /// Get the k-values to process as an arithmetic sequence
+    pub fn k_values(&self) -> Vec<usize> {
+        (self.k_range.start..self.k_range.end)
+            .step_by(self.k_step)
+            .collect()
+    }
+    
+    /// Get filtering method description for logging
+    pub fn filter_method_description(&self) -> String {
+        match self.min_count {
+            Some(count) => format!("min_count={}", count),
+            None => format!("z_score_threshold={}", self.z_score_threshold),
+        }
+    }
+}
+
+/// Validate CLI arguments and return errors for invalid combinations
+fn validate_args(args: &KmerEnrichmentArgs) -> Result<()> {
+    if args.k_min > args.k_max {
+        return Err(anyhow::anyhow!(
+            "k-min ({}) must be less than or equal to k-max ({})",
+            args.k_min, args.k_max
+        ));
+    }
+    
+    if args.k_step == 0 {
+        return Err(anyhow::anyhow!("k-step must be greater than 0"));
+    }
+    
+    if args.k_step > (args.k_max - args.k_min) {
+        return Err(anyhow::anyhow!(
+            "k-step ({}) is too large for the given k-range ({} to {})",
+            args.k_step, args.k_min, args.k_max
+        ));
+    }
+    
+    if args.z_score_threshold < 0.1 || args.z_score_threshold > 20.0 {
+        return Err(anyhow::anyhow!(
+            "z-score-threshold ({}) must be between 0.1 and 20.0",
+            args.z_score_threshold
+        ));
+    }
+    
+    if args.top_kmers == 0 {
+        return Err(anyhow::anyhow!("top-kmers must be greater than 0"));
+    }
+    
+    // Check if output directory exists and is writable
+    let output_path = if args.output.is_absolute() {
+        args.output.clone()
+    } else {
+        std::env::current_dir()?.join(&args.output)
+    };
+    
+    if let Some(parent) = output_path.parent() {
+        if !parent.exists() {
+            return Err(anyhow::anyhow!(
+                "Output directory does not exist: {}",
+                parent.display()
+            ));
+        }
+    }
+    
+    Ok(())
 }
 
 pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
+    // Create configuration from arguments (includes validation)
+    let config = KmerConfig::from_args(args)?;
+    
     println!("Starting k-mer enrichment analysis...");
     
-    // Determine which filtering method to use
-    let filter_method = if let Some(min_count) = args.min_count {
-        format!("min_count={min_count}")
-    } else {
-        format!("z_score_threshold={}", args.z_score_threshold)
-    };
-    
-    println!("Parameters: k_min={}, k_max={}, top_kmers={}, filter_method={filter_method}", 
-        args.k_min, args.k_max, args.top_kmers);
+    // Collect k-values for processing
+    let k_values = config.k_values();
+    println!(
+        "Parameters: k_values={:?}, top_kmers={}, filter_method={}",
+        k_values,
+        config.top_kmers,
+        config.filter_method_description()
+    );
 
     // Phase 1: Load sequences
     println!("Phase 1: Loading sequences...");
@@ -63,32 +251,34 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     // Phase 2: K-mer counting and top-N selection
     println!("Phase 2: K-mer counting and selection...");
     let mut enriched_kmers = HashMap::new();
-    for k in args.k_min..=args.k_max {
+    for &k in &k_values {
         println!("Processing {k}-mers...");
-        let kmer_counts = if let Some(min_count) = args.min_count {
+        let kmer_counts = if let Some(min_count) = config.min_count {
             count_kmers_with_min_count(&records, k, min_count)
         } else {
-            count_kmers_with_zscore(&records, k, total_length, args.z_score_threshold)
+            count_kmers_with_zscore(&records, k, total_length, config.z_score_threshold)
         };
         println!("Found {} {k}-mers above threshold", kmer_counts.len());
         
-        let selected_kmers = select_top_kmers(kmer_counts, k, args.top_kmers);
+        let selected_kmers = select_top_kmers(kmer_counts, k, config.top_kmers, config.detect_reverse_complement);
         enriched_kmers.insert(k, selected_kmers);
     }
 
     // Phase 3: Cross-k substring filtering
     println!("Phase 3: Substring filtering...");
-    let enriched_kmers = filter_substrings(enriched_kmers, args.k_min, args.k_max);
+    let k_min = *k_values.first().unwrap();
+    let k_max = *k_values.last().unwrap();
+    let enriched_kmers = filter_substrings(enriched_kmers, k_min, k_max);
 
     // Phase 4: Assembly and reporting
     println!("Phase 4: Assembly and reporting...");
     let mut assembled_sequences = HashMap::new();
-    if let Some(enriched_k_max) = enriched_kmers.get(&args.k_max) {
-        assembled_sequences = assemble_kmers(enriched_k_max, args.k_max);
+    if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
+        assembled_sequences = assemble_kmers(enriched_k_max, k_max);
     }
 
-    write_report(&args.output, &enriched_kmers, &assembled_sequences, args.k_min, args.k_max)?;
-    println!("Analysis complete. Results written to {}", args.output.display());
+    write_report(&config.output_path, &enriched_kmers, &assembled_sequences, k_min, k_max)?;
+    println!("Analysis complete. Results written to {}", config.output_path.display());
 
     Ok(())
 }
@@ -151,10 +341,16 @@ fn count_kmers_with_zscore(
 
 /// Select top k-mers with balanced approach for homopolymers
 fn select_top_kmers(
-    kmer_counts: HashMap<Vec<u8>, u64>, 
+    mut kmer_counts: HashMap<Vec<u8>, u64>, 
     k: usize, 
     top_n: usize,
+    detect_reverse_complement: bool,
 ) -> HashMap<Vec<u8>, u64> {
+    // Merge reverse complement counts if requested
+    if detect_reverse_complement {
+        kmer_counts = merge_reverse_complements(kmer_counts);
+    }
+    
     let initial_count = kmer_counts.len();
     
     if initial_count <= top_n {
@@ -219,12 +415,20 @@ fn is_homopolymer(kmer: &[u8]) -> bool {
 
 fn filter_substrings(
     mut enriched_kmers: HashMap<usize, HashMap<Vec<u8>, u64>>,
-    k_min: usize,
+    _k_min: usize,
     k_max: usize,
 ) -> HashMap<usize, HashMap<Vec<u8>, u64>> {
+    // Get all k-values that are actually present (in case of step > 1)
+    let mut k_values: Vec<usize> = enriched_kmers.keys().copied().collect();
+    k_values.sort();
+    
     // Process in increasing k order: k_min to k_max-1
     // This ensures shorter k-mers are filtered out by longer ones iteratively
-    for k in k_min..k_max {
+    for &k in &k_values {
+        if k >= k_max {
+            continue; // Don't filter the largest k-value
+        }
+        
         let short_kmers = if let Some(short_kmers) = enriched_kmers.get(&k) {
             short_kmers.clone()
         } else {
@@ -236,18 +440,20 @@ fn filter_substrings(
         let surviving_kmers: HashMap<Vec<u8>, u64> = short_kmers
             .into_par_iter()
             .filter(|(kmer_short, count_short)| {
-                // Check against ALL longer k-mers (k+1, k+2, ..., k_max)
-                let should_remove = (k+1..=k_max).any(|long_k| {
-                    if let Some(long_kmers) = enriched_kmers.get(&long_k) {
-                        long_kmers.iter().any(|(kmer_long, count_long)| {
-                            let ratio = *count_long as f64 / *count_short as f64;
-                            let is_sub = is_substring(kmer_short, kmer_long);
-                            ratio >= SUBSTRING_COUNT_RATIO_THRESHOLD && is_sub
-                        })
-                    } else {
-                        false
-                    }
-                });
+                // Check against ALL longer k-mers in our k_values
+                let should_remove = k_values.iter()
+                    .filter(|&&long_k| long_k > k)
+                    .any(|&long_k| {
+                        if let Some(long_kmers) = enriched_kmers.get(&long_k) {
+                            long_kmers.iter().any(|(kmer_long, count_long)| {
+                                let ratio = *count_long as f64 / *count_short as f64;
+                                let is_sub = is_substring(kmer_short, kmer_long);
+                                ratio >= SUBSTRING_COUNT_RATIO_THRESHOLD && is_sub
+                            })
+                        } else {
+                            false
+                        }
+                    });
                 
                 !should_remove
             })
