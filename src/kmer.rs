@@ -188,7 +188,7 @@ impl KmerConfig {
     /// Get filtering method description for logging
     pub fn filter_method_description(&self) -> String {
         match self.min_count {
-            Some(count) => format!("min_count={}", count),
+            Some(count) => format!("min_count={count}"),
             None => format!("z_score_threshold={}", self.z_score_threshold),
         }
     }
@@ -259,8 +259,8 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
         config.filter_method_description()
     );
 
-    // Phase 1: Load sequences
-    println!("Phase 1: Loading sequences...");
+    // Load sequences
+    println!("Loading sequences...");
     let mut reader = SequenceReader::from_path(file_path)?;
     let mut records = Vec::new();
     let mut total_length = 0;
@@ -272,8 +272,8 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     }
     println!("Loaded {} sequences with total length {} bp", records.len(), total_length);
 
-    // Phase 2: K-mer counting and top-N selection
-    println!("Phase 2: K-mer counting and selection...");
+    // K-mer counting and top-N selection
+    println!("K-mer counting and selection...");
     let mut enriched_kmers = HashMap::new();
     for &k in &k_values {
         println!("Processing {k}-mers...");
@@ -288,28 +288,27 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
         enriched_kmers.insert(k, selected_kmers);
     }
 
-    // Phase 3: Cross-k substring filtering
-    println!("Phase 3: Substring filtering...");
+    // Cross-k substring filtering
+    println!("Substring filtering...");
     let k_min = *k_values.first().unwrap();
     let k_max = *k_values.last().unwrap();
     let enriched_kmers = filter_substrings(enriched_kmers, k_min, k_max);
 
-    // Phase 4: Assembly and reporting
-    println!("Phase 4: Assembly and reporting...");
+    // Assembly and reporting
+    println!("Assembly and reporting...");
     let mut assembled_sequences = HashMap::new();
     if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
         assembled_sequences = assemble_kmers(enriched_k_max, k_max);
     }
 
-    // Phase 5: Optional post-assembly reverse complement merging
+    // Optional post-assembly reverse complement merging
     let assembled_results = if config.detect_reverse_complement {
-        println!("Phase 5: Merging reverse complement sequences...");
+        println!("Merging reverse complement sequences...");
         let original_count = assembled_sequences.len();
         let merged_results = merge_sequences_with_rc(assembled_sequences, true);
         let merged_count = merged_results.len();
         if original_count != merged_count {
-            println!("  Merged {} sequences to {} after reverse complement consolidation", 
-                original_count, merged_count);
+            println!("  Merged {original_count} sequences to {merged_count} after reverse complement consolidation");
         }
         merged_results
     } else {
@@ -317,7 +316,7 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     };
 
     write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement)?;
-    println!("Analysis complete. Results written to {}", config.output_path.display());
+    println!("Results written to {}", config.output_path.display());
 
     Ok(())
 }
