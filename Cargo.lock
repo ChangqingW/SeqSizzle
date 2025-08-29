@@ -1496,7 +1496,6 @@ dependencies = [
  "ratatui",
  "rayon",
  "shadow-rs",
- "statrs",
  "tui-textarea",
  "uuid",
 ]

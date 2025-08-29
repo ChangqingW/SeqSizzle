@@ -5,7 +5,6 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::ops::Range;
-use statrs::distribution::{Poisson, DiscreteCDF};
 
 const SUBSTRING_COUNT_RATIO_THRESHOLD: f64 = 0.8; // Threshold for substring filtering
 
@@ -26,7 +25,7 @@ impl KmerStats {
         sequence: Vec<u8>, 
         observed_count: u64, 
         expected_count: f64,
-        total_sequences: usize, // for multiple testing correction
+        // total_sequences: usize, // for multiple testing correction
     ) -> Self {
         
         let x = observed_count as f64 / expected_count;
@@ -96,17 +95,6 @@ impl MergeResult {
         }
     }
     
-    /// Create a result for a single sequence with statistics
-    fn single_with_stats(sequence: Vec<u8>, count: u64, stats: KmerStats) -> Self {
-        Self {
-            sequence,
-            total_count: count,
-            forward_count: None,
-            reverse_count: None,
-            stats: Some(stats),
-        }
-    }
-    
     /// Create a result for merged sequences
     fn merged(sequence: Vec<u8>, forward_count: u64, reverse_count: u64) -> Self {
         Self {
@@ -115,17 +103,6 @@ impl MergeResult {
             forward_count: Some(forward_count),
             reverse_count: Some(reverse_count),
             stats: None,
-        }
-    }
-    
-    /// Create a result for merged sequences with statistics
-    fn merged_with_stats(sequence: Vec<u8>, forward_count: u64, reverse_count: u64, stats: KmerStats) -> Self {
-        Self {
-            sequence,
-            total_count: forward_count + reverse_count,
-            forward_count: Some(forward_count),
-            reverse_count: Some(reverse_count),
-            stats: Some(stats),
         }
     }
     
@@ -138,41 +115,6 @@ impl MergeResult {
             _ => self.total_count.to_string(),
         }
     }
-}
-
-/// Apply a configuration preset to modify the arguments
-fn apply_preset(args: &mut KmerEnrichmentArgs, preset: &str) -> Result<()> {
-    match preset.to_lowercase().as_str() {
-        "quick" => {
-            // Fast analysis: larger k-step, fewer k-mers
-            if args.k_step == 1 { args.k_step = 2; }  // Only override if not explicitly set
-            if args.top_kmers == 200 { args.top_kmers = 100; }
-            println!("Applied 'quick' preset: k-step={}, top-kmers={}", args.k_step, args.top_kmers);
-        },
-        "sensitive" => {
-            // Comprehensive analysis: k-step=1, more k-mers
-            args.k_step = 1;
-            if args.top_kmers == 200 { args.top_kmers = 500; }
-            args.detect_reverse_complement = true;
-            println!("Applied 'sensitive' preset: k-step={}, top-kmers={}, reverse-complement=true", 
-                args.k_step, args.top_kmers);
-        },
-        "memory-efficient" => {
-            // Low memory usage: larger k-step, fewer k-mers, smaller k-range
-            if args.k_step == 1 { args.k_step = 3; }
-            if args.top_kmers == 200 { args.top_kmers = 50; }
-            if args.k_max == 25 { args.k_max = 20; }  // Reduce max k
-            println!("Applied 'memory-efficient' preset: k-step={}, top-kmers={}, k-max={}", 
-                args.k_step, args.top_kmers, args.k_max);
-        },
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unknown preset '{}'. Available presets: quick, sensitive, memory-efficient", 
-                preset
-            ));
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug, Args, Clone)]
@@ -209,9 +151,6 @@ pub struct KmerEnrichmentArgs {
     #[clap(long)]
     pub detect_reverse_complement: bool,
 
-    /// Use a predefined parameter preset (quick, sensitive, memory-efficient).
-    #[clap(long)]
-    pub preset: Option<String>,
 }
 
 /// Configuration struct for centralized parameter management
@@ -229,13 +168,7 @@ pub struct KmerConfig {
 impl KmerConfig {
     /// Create a new configuration from CLI arguments
     pub fn from_args(args: &KmerEnrichmentArgs) -> Result<Self> {
-        // Apply preset if specified
-        let mut args = args.clone();
-        if let Some(preset) = &args.preset.clone() {
-            apply_preset(&mut args, preset)?;
-        }
         
-        // Validate arguments after preset application
         validate_args(&args)?;
         
         let output_path = if args.output.is_absolute() {
@@ -355,13 +288,13 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     for &k in &k_values {
         println!("Processing {k}-mers...");
         let kmer_stats = if let Some(min_count) = config.min_count {
-            count_kmers_with_min_count_stats(&records, k, min_count, total_length)
+            count_kmers_with_min_count(&records, k, min_count, total_length)
         } else {
             count_kmers_with_zscore_stats(&records, k, total_length, config.z_score_threshold)
         };
         println!("Found {} {k}-mers above threshold", kmer_stats.len());
         
-        let selected_kmers = select_top_kmers_stats(kmer_stats, k, config.top_kmers);
+        let selected_kmers = select_top_kmers(kmer_stats, k, config.top_kmers);
         enriched_kmers.insert(k, selected_kmers);
     }
 
@@ -369,27 +302,27 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     println!("Substring filtering...");
     let k_min = *k_values.first().unwrap();
     let k_max = *k_values.last().unwrap();
-    let enriched_kmers = filter_substrings_stats(enriched_kmers, k_min, k_max);
+    let enriched_kmers = filter_substrings(enriched_kmers, k_min, k_max);
 
     // Assembly and reporting
     println!("Assembly and reporting...");
     let mut assembled_sequences = HashMap::new();
     if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
-        assembled_sequences = assemble_kmers_stats(enriched_k_max, k_max);
+        assembled_sequences = assemble_kmers(enriched_k_max, k_max);
     }
 
     // Optional post-assembly reverse complement merging
     let assembled_results = if config.detect_reverse_complement {
         println!("Merging reverse complement sequences...");
         let original_count = assembled_sequences.len();
-        let merged_results = merge_sequences_with_rc_stats(assembled_sequences, true);
+        let merged_results = merge_sequences_with_rc(assembled_sequences, true);
         let merged_count = merged_results.len();
         if original_count != merged_count {
             println!("  Merged {original_count} sequences to {merged_count} after reverse complement consolidation");
         }
         merged_results
     } else {
-        merge_sequences_with_rc_stats(assembled_sequences, false)
+        merge_sequences_with_rc(assembled_sequences, false)
     };
 
     write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement, total_length)?;
@@ -398,26 +331,7 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     Ok(())
 }
 
-fn count_kmers_with_min_count(records: &[SequenceRecord], k: usize, min_threshold: u64) -> HashMap<Vec<u8>, u64> {
-    records
-        .par_iter()
-        .flat_map(|record| record.seq().par_windows(k))
-        .fold(HashMap::new, |mut acc, kmer| {
-            *acc.entry(kmer.to_vec()).or_insert(0) += 1;
-            acc
-        })
-        .reduce(HashMap::new, |mut a, b| {
-            for (kmer, count) in b {
-                *a.entry(kmer).or_insert(0) += count;
-            }
-            a
-        })
-        .into_iter()
-        .filter(|(_, count)| *count >= min_threshold)
-        .collect()
-}
-
-fn count_kmers_with_min_count_stats(
+fn count_kmers_with_min_count(
     records: &[SequenceRecord], 
     k: usize, 
     min_threshold: u64,
@@ -443,12 +357,13 @@ fn count_kmers_with_min_count_stats(
         });
     
     // Filter and convert to KmerStats
-    let total_kmers_count = kmer_counts.len();
+    // not calculating adjusted p-values anymore
+    // let total_kmers_count = kmer_counts.len();
     kmer_counts
         .into_iter()
         .filter(|(_, count)| *count >= min_threshold)
         .map(|(kmer, count)| {
-            let stats = KmerStats::new(kmer.clone(), count, expected_frequency, total_kmers_count);
+            let stats = KmerStats::new(kmer.clone(), count, expected_frequency);
             (kmer, stats)
         })
         .collect()
@@ -488,12 +403,12 @@ fn count_kmers_with_zscore_stats(
         });
     
     // Filter and convert to KmerStats
-    let total_kmers_count = kmer_counts.len();
+    // let total_kmers_count = kmer_counts.len();
     kmer_counts
         .into_iter()
         .filter(|(_, count)| *count >= min_count_threshold)
         .map(|(kmer, count)| {
-            let stats = KmerStats::new(kmer.clone(), count, expected_frequency, total_kmers_count);
+            let stats = KmerStats::new(kmer.clone(), count, expected_frequency);
             (kmer, stats)
         })
         .collect()
@@ -501,52 +416,6 @@ fn count_kmers_with_zscore_stats(
 
 /// Select top k-mers with balanced approach for homopolymers
 fn select_top_kmers(
-    kmer_counts: HashMap<Vec<u8>, u64>, 
-    k: usize, 
-    top_n: usize,
-) -> HashMap<Vec<u8>, u64> {
-    let initial_count = kmer_counts.len();
-    
-    if initial_count <= top_n {
-        println!("  {initial_count} {k}-mers selected (keeping all)");
-        return kmer_counts;
-    }
-
-    // Separate homopolymers from other sequences
-    let (homopolymers, other_kmers): (Vec<_>, Vec<_>) = kmer_counts
-        .iter()
-        .partition(|(kmer, _)| is_homopolymer(kmer));
-
-    // Strategy: Keep some homopolymers, but focus on non-homopolymer sequences
-    let max_homopolymers = (top_n / 10).clamp(4, 20); // 10% for homopolymers, 4-20 range
-    let remaining_slots = top_n.saturating_sub(max_homopolymers.min(homopolymers.len()));
-
-    let mut result = HashMap::new();
-
-    // Add top homopolymers by count
-    let mut sorted_homopolymers = homopolymers;
-    sorted_homopolymers.sort_by(|a, b| b.1.cmp(a.1));
-    for (kmer, count) in sorted_homopolymers.into_iter().take(max_homopolymers) {
-        result.insert(kmer.clone(), *count);
-    }
-
-    // Add top non-homopolymer sequences
-    let mut sorted_others: Vec<_> = other_kmers.into_iter().collect();
-    sorted_others.sort_by(|a, b| b.1.cmp(a.1));
-    for (kmer, count) in sorted_others.into_iter().take(remaining_slots) {
-        result.insert(kmer.clone(), *count);
-    }
-    
-    let homo_count = result.iter().filter(|(kmer, _)| is_homopolymer(kmer)).count();
-    let other_count = result.len() - homo_count;
-    println!("  {} {k}-mers selected ({homo_count} homopolymers, {other_count} others)", 
-        result.len());
-    
-    result
-}
-
-/// Select top k-mers with balanced approach for homopolymers (version that works with KmerStats)
-fn select_top_kmers_stats(
     kmer_stats: HashMap<Vec<u8>, KmerStats>, 
     k: usize, 
     top_n: usize,
@@ -616,7 +485,7 @@ fn is_substring(sub: &[u8], main: &[u8]) -> bool {
     main.windows(sub.len()).any(|window| window == sub)
 }
 
-fn filter_substrings_stats(
+fn filter_substrings(
     mut enriched_kmers: HashMap<usize, HashMap<Vec<u8>, KmerStats>>,
     _k_min: usize,
     k_max: usize,
@@ -696,7 +565,8 @@ fn is_substring_of_assembled_sequences(
     false
 }
 
-/// Generic function to merge sequences with their reverse complements
+
+/// Generic function to merge sequences with their reverse complements (version that handles stats)
 /// Works for both k-mers and assembled sequences
 fn merge_sequences_with_rc(
     sequences: HashMap<Vec<u8>, u64>,
@@ -749,197 +619,7 @@ fn merge_sequences_with_rc(
     results
 }
 
-/// Generic function to merge sequences with their reverse complements (version that handles stats)
-/// Works for both k-mers and assembled sequences
-fn merge_sequences_with_rc_stats(
-    sequences: HashMap<Vec<u8>, u64>,
-    enable_merging: bool,
-) -> HashMap<Vec<u8>, MergeResult> {
-    let mut results = HashMap::new();
-    
-    if !enable_merging {
-        // No RC merging, convert to single results
-        for (seq, count) in sequences {
-            results.insert(seq.clone(), MergeResult::single(seq, count));
-        }
-        return results;
-    }
-    
-    let mut processed = std::collections::HashSet::new();
-    
-    for (seq, count) in &sequences {
-        if processed.contains(seq) {
-            continue;
-        }
-        
-        let rev_comp = reverse_complement(seq);
-        
-        // Check if we've already seen the reverse complement
-        if let Some(rc_count) = sequences.get(&rev_comp) {
-            if !processed.contains(&rev_comp) && seq != &rev_comp {
-                // Choose the lexicographically smaller sequence as canonical
-                let (canonical, forward_count, reverse_count) = if seq <= &rev_comp {
-                    (seq.clone(), *count, *rc_count)
-                } else {
-                    (rev_comp.clone(), *rc_count, *count)
-                };
-                
-                results.insert(
-                    canonical.clone(),
-                    MergeResult::merged(canonical, forward_count, reverse_count),
-                );
-                
-                processed.insert(seq.clone());
-                processed.insert(rev_comp);
-            }
-        } else {
-            // No reverse complement found, or it's a palindrome
-            results.insert(seq.clone(), MergeResult::single(seq.clone(), *count));
-            processed.insert(seq.clone());
-        }
-    }
-    
-    results
-}
-
 fn assemble_kmers(
-    enriched_kmers: &HashMap<Vec<u8>, u64>,
-    k: usize,
-) -> HashMap<Vec<u8>, u64> {
-    if enriched_kmers.is_empty() {
-        return HashMap::new();
-    }
-
-    // Build overlap graph with stricter overlap criteria
-    let mut graph: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
-    let mut reverse_graph: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
-
-    let kmers: Vec<_> = enriched_kmers.keys().collect();
-    
-    // Find valid overlaps between k-mers
-    // Only consider overlaps of at least k/2 length to avoid spurious connections
-    let min_overlap = (k / 2).max(3);
-    
-    for &kmer_a in &kmers {
-        for &kmer_b in &kmers {
-            if kmer_a == kmer_b {
-                continue;
-            }
-            
-            let count_a = enriched_kmers.get(kmer_a).unwrap();
-            let count_b = enriched_kmers.get(kmer_b).unwrap();
-            
-            // Check if counts are reasonably compatible
-            // Allow more variation but still require some similarity
-            if (*count_b as f64) < (*count_a as f64 * 0.3) || (*count_b as f64) > (*count_a as f64 * 3.0) {
-                continue;
-            }
-            
-            // Find significant overlaps: kmer_a suffix matches kmer_b prefix
-            let max_overlap = (kmer_a.len() - 1).min(kmer_b.len() - 1);
-            for overlap_len in (min_overlap..=max_overlap).rev() {
-                let suffix = &kmer_a[kmer_a.len() - overlap_len..];
-                let prefix = &kmer_b[..overlap_len];
-                
-                if suffix == prefix {
-                    // Found a valid significant overlap
-                    graph.entry(kmer_a.clone()).or_default().push(kmer_b.clone());
-                    reverse_graph.entry(kmer_b.clone()).or_default().push(kmer_a.clone());
-                    break; // Take the longest overlap
-                }
-            }
-        }
-    }
-
-    // Find start nodes (nodes with no incoming edges or weak incoming edges)
-    let mut start_nodes: Vec<_> = enriched_kmers.keys()
-        .filter(|kmer| !reverse_graph.contains_key(*kmer))
-        .collect();
-    
-    // If no clear start nodes, pick nodes with highest counts as potential starts
-    if start_nodes.is_empty() {
-        let mut kmer_counts: Vec<_> = enriched_kmers.iter().collect();
-        kmer_counts.sort_by(|a, b| b.1.cmp(a.1));
-        start_nodes = kmer_counts.into_iter().take(5).map(|(k, _)| k).collect();
-    }
-
-    let mut assembled_sequences = HashMap::new();
-    let mut processed = std::collections::HashSet::new();
-
-    for start_node in start_nodes {
-        if processed.contains(start_node) {
-            continue;
-        }
-
-        let mut path = vec![start_node.clone()];
-        let mut current_node = start_node.clone();
-        processed.insert(current_node.clone());
-
-        // Follow linear paths, being more permissive about branching
-        while let Some(neighbors) = graph.get(&current_node) {
-            // Pick the best next neighbor (highest count among unprocessed)
-            let mut best_next = None;
-            let mut best_count = 0;
-            
-            for next_node in neighbors {
-                if !processed.contains(next_node) {
-                    let count = *enriched_kmers.get(next_node).unwrap();
-                    if count > best_count {
-                        best_count = count;
-                        best_next = Some(next_node);
-                    }
-                }
-            }
-            
-            if let Some(next_node) = best_next {
-                path.push(next_node.clone());
-                processed.insert(next_node.clone());
-                current_node = next_node.clone();
-            } else {
-                break;
-            }
-        }
-
-        // Keep sequences with multiple k-mers
-        if path.len() > 1 {
-            // Reconstruct the sequence by finding actual overlaps
-            let mut assembled_seq = path[0].clone();
-            let mut total_count = *enriched_kmers.get(&path[0]).unwrap();
-            
-            for i in 1..path.len() {
-                let prev_kmer = &path[i-1];
-                let curr_kmer = &path[i];
-                
-                // Find the overlap length between consecutive k-mers
-                let max_overlap = (prev_kmer.len() - 1).min(curr_kmer.len() - 1);
-                let mut overlap_len = 1;
-                
-                for ol in (min_overlap..=max_overlap).rev() {
-                    let suffix = &prev_kmer[prev_kmer.len() - ol..];
-                    let prefix = &curr_kmer[..ol];
-                    if suffix == prefix {
-                        overlap_len = ol;
-                        break;
-                    }
-                }
-                
-                // Append the non-overlapping part of current k-mer
-                assembled_seq.extend_from_slice(&curr_kmer[overlap_len..]);
-                total_count += enriched_kmers.get(curr_kmer).unwrap();
-            }
-            
-            let avg_count = total_count / path.len() as u64;
-            assembled_sequences.insert(assembled_seq, avg_count);
-        }
-    }
-    
-    if !assembled_sequences.is_empty() {
-        println!("  Assembly found {} sequences", assembled_sequences.len());
-    }
-    assembled_sequences
-}
-
-fn assemble_kmers_stats(
     enriched_kmers: &HashMap<Vec<u8>, KmerStats>,
     k: usize,
 ) -> HashMap<Vec<u8>, u64> {
@@ -1083,17 +763,8 @@ fn calculate_assembled_stats(sequence: &[u8], estimated_count: u64, total_length
     let total_possible_kmers = total_length.saturating_sub(k - 1);
     let expected_count = total_possible_kmers as f64 / (4_f64.powi(k as i32));
     
-    // Use the same statistical calculations as for k-mers
-    let poisson = Poisson::new(expected_count).unwrap_or_else(|_| Poisson::new(1e-10).unwrap());
-    let pvalue = if estimated_count == 0 {
-        1.0
-    } else {
-        1.0 - poisson.cdf(estimated_count - 1)
-    };
-    
     // For assembled sequences, we use a smaller multiple testing correction factor
     // since there are fewer assembled sequences than individual k-mers
-    let adj_pvalue = (pvalue * 1000.0).min(1.0);  // Assume ~1000 sequences for correction
     let x = estimated_count as f64 / expected_count;
     let h = x * x.ln() - x + 1.0;
     let neg_log10_pvalue = estimated_count as f64 * h / std::f64::consts::LN_10;
@@ -1118,25 +789,6 @@ fn calculate_assembled_stats(sequence: &[u8], estimated_count: u64, total_length
 }
 
 fn merge_kmers_with_rc(
-    enriched_kmers: &HashMap<Vec<u8>, u64>,
-    rc_merging_applied: bool,
-) -> Vec<(String, usize, String, String)> {
-    let merged_results = merge_sequences_with_rc(enriched_kmers.clone(), rc_merging_applied);
-    
-    let mut results = Vec::new();
-    for (_, merge_result) in merged_results {
-        results.push((
-            String::from_utf8_lossy(&merge_result.sequence).into_owned(),
-            merge_result.sequence.len(),
-            merge_result.format_count(),
-            "".to_string(), // source_k will be filled by caller
-        ));
-    }
-    
-    results
-}
-
-fn merge_kmers_with_rc_stats(
     enriched_kmers: &HashMap<Vec<u8>, KmerStats>,
     rc_merging_applied: bool,
 ) -> Vec<(String, usize, String, String, f64, f64, f64)> {
@@ -1146,7 +798,7 @@ fn merge_kmers_with_rc_stats(
         .map(|(k, stats)| (k.clone(), stats.observed_count))
         .collect();
     
-    let merged_results = merge_sequences_with_rc_stats(kmer_counts, rc_merging_applied);
+    let merged_results = merge_sequences_with_rc(kmer_counts, rc_merging_applied);
     
     let mut results = Vec::new();
     for (seq, merge_result) in merged_results {
@@ -1208,7 +860,7 @@ fn write_report(
 
     // Handle k-mers from k_max, with RC merging if applicable
     if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
-        let mut kmer_results = merge_kmers_with_rc_stats(enriched_k_max, rc_merging_applied);
+        let mut kmer_results = merge_kmers_with_rc(enriched_k_max, rc_merging_applied);
         
         // Filter out k-mers that are substrings of assembled sequences
         kmer_results.retain(|(kmer_str, _, _, _, _, _, _)| {
@@ -1227,7 +879,7 @@ fn write_report(
     // Handle k-mers from smaller k values, with RC merging if applicable
     for k in (k_min..k_max).rev() {
         if let Some(enriched_k) = enriched_kmers.get(&k) {
-            let mut kmer_results = merge_kmers_with_rc_stats(enriched_k, rc_merging_applied);
+            let mut kmer_results = merge_kmers_with_rc(enriched_k, rc_merging_applied);
             
             // Filter out k-mers that are substrings of assembled sequences
             kmer_results.retain(|(kmer_str, _, _, _, _, _, _)| {
@@ -1309,9 +961,9 @@ mod tests {
     fn test_filter_substrings_simple_removal() {
         let mut enriched = HashMap::new();
         let mut k8 = HashMap::new();
-        k8.insert(to_bytes("AAAAAAAA"), 100);
+        k8.insert(to_bytes("AAAAAAAA"), KmerStats::new(to_bytes("AAAAAAAA"), 100, 50.0));
         let mut k9 = HashMap::new();
-        k9.insert(to_bytes("AAAAAAAAA"), 90); // 90 >= 100 * 0.8
+        k9.insert(to_bytes("AAAAAAAAA"), KmerStats::new(to_bytes("AAAAAAAAA"), 90, 25.0)); // 90 >= 100 * 0.8
         enriched.insert(8, k8);
         enriched.insert(9, k9);
 
@@ -1324,9 +976,9 @@ mod tests {
     fn test_filter_substrings_no_removal() {
         let mut enriched = HashMap::new();
         let mut k8 = HashMap::new();
-        k8.insert(to_bytes("AAAAAAAA"), 100);
+        k8.insert(to_bytes("AAAAAAAA"), KmerStats::new(to_bytes("AAAAAAAA"), 100, 50.0));
         let mut k9 = HashMap::new();
-        k9.insert(to_bytes("AAAAAAAAA"), 70); // 70 < 100 * 0.8
+        k9.insert(to_bytes("AAAAAAAAA"), KmerStats::new(to_bytes("AAAAAAAAA"), 70, 25.0)); // 70 < 100 * 0.8
         enriched.insert(8, k8);
         enriched.insert(9, k9);
 
