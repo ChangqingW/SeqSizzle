@@ -43,6 +43,7 @@ Usage: seqsizzle [OPTIONS] <FILE> [COMMAND]
 
 Commands:
   summarize  Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped, print the number of reads that match each pattern combination in TSV format. To be moved to the UI in the future
+  enrich     Find enriched k-mers in the reads. This can be used to identify potential adapter/primer sequences
   help       Print this message or the help of the given subcommand(s)
 
 Arguments:
@@ -103,7 +104,7 @@ Use **Shift +** arrow keys to move cursor within an input field (as arrow keys a
  -  [x] Gzip (`fastq.gz`) support
  -  [x] FASTA support
  -  [x] Styling mismatches and low quality bases
- -  [ ] Built-in k-mer enrichment to identify primers and adaptors
+ -  [x] Built-in k-mer enrichment to identify primers and adaptors
  -  [ ] Filter reads by match  
  -  [ ] Counting reads with match  
 ## UI

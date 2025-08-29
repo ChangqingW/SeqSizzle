@@ -2,6 +2,9 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.3.0]
+ * added kmer enrichment analysis (`enrich` subcommand)
+
 ## [0.2.0]
  * added FASTA file format support
  * added gzipped file support (decompresses 10MB to a temporary file)
