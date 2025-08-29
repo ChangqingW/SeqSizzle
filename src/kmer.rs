@@ -59,20 +59,6 @@ impl KmerStats {
     }
 }
 
-/// Compute the reverse complement of a DNA sequence
-fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-    seq.iter()
-        .rev()
-        .map(|&base| match base.to_ascii_uppercase() {
-            b'A' => b'T',
-            b'T' => b'A',
-            b'G' => b'C',
-            b'C' => b'G',
-            _ => base, // Keep ambiguous bases as-is
-        })
-        .collect()
-}
-
 /// Result of merging sequences with their reverse complements
 #[derive(Debug, Clone)]
 pub struct MergeResult {
@@ -128,11 +114,11 @@ pub struct KmerEnrichmentArgs {
     pub k_min: usize,
 
     /// Maximum k-mer length to check.
-    #[clap(long, default_value_t = 25)]
+    #[clap(long, default_value_t = 12)]
     pub k_max: usize,
 
     /// Step size between k-values (arithmetic progression).
-    #[clap(long, default_value_t = 1)]
+    #[clap(long, default_value_t = 2)]
     pub k_step: usize,
 
     /// Number of top k-mers to keep per k value.
@@ -169,7 +155,7 @@ impl KmerConfig {
     /// Create a new configuration from CLI arguments
     pub fn from_args(args: &KmerEnrichmentArgs) -> Result<Self> {
         
-        validate_args(&args)?;
+        validate_args(args)?;
         
         let output_path = if args.output.is_absolute() {
             args.output.clone()
@@ -254,83 +240,47 @@ fn validate_args(args: &KmerEnrichmentArgs) -> Result<()> {
     Ok(())
 }
 
-pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
-    // Create configuration from arguments (includes validation)
-    let config = KmerConfig::from_args(args)?;
-    
-    println!("Starting k-mer enrichment analysis...");
-    
-    // Collect k-values for processing
-    let k_values = config.k_values();
-    println!(
-        "Parameters: k_values={:?}, top_kmers={}, filter_method={}",
-        k_values,
-        config.top_kmers,
-        config.filter_method_description()
-    );
 
-    // Load sequences
-    println!("Loading sequences...");
-    let mut reader = SequenceReader::from_path(file_path)?;
-    let mut records = Vec::new();
-    let mut total_length = 0;
-    let mut index = 0;
-    while let Some(record) = reader.get_index(index)? {
-        total_length += record.seq().len();
-        records.push(record);
-        index += 1;
-    }
-    println!("Loaded {} sequences with total length {} bp", records.len(), total_length);
-
-    // K-mer counting and top-N selection
-    println!("K-mer counting and selection...");
-    let mut enriched_kmers = HashMap::new();
-    for &k in &k_values {
-        println!("Processing {k}-mers...");
-        let kmer_stats = if let Some(min_count) = config.min_count {
-            count_kmers_with_min_count(&records, k, min_count, total_length)
-        } else {
-            count_kmers_with_zscore_stats(&records, k, total_length, config.z_score_threshold)
-        };
-        println!("Found {} {k}-mers above threshold", kmer_stats.len());
-        
-        let selected_kmers = select_top_kmers(kmer_stats, k, config.top_kmers);
-        enriched_kmers.insert(k, selected_kmers);
-    }
-
-    // Cross-k substring filtering
-    println!("Substring filtering...");
-    let k_min = *k_values.first().unwrap();
-    let k_max = *k_values.last().unwrap();
-    let enriched_kmers = filter_substrings(enriched_kmers, k_min, k_max);
-
-    // Assembly and reporting
-    println!("Assembly and reporting...");
-    let mut assembled_sequences = HashMap::new();
-    if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
-        assembled_sequences = assemble_kmers(enriched_k_max, k_max);
-    }
-
-    // Optional post-assembly reverse complement merging
-    let assembled_results = if config.detect_reverse_complement {
-        println!("Merging reverse complement sequences...");
-        let original_count = assembled_sequences.len();
-        let merged_results = merge_sequences_with_rc(assembled_sequences, true);
-        let merged_count = merged_results.len();
-        if original_count != merged_count {
-            println!("  Merged {original_count} sequences to {merged_count} after reverse complement consolidation");
-        }
-        merged_results
-    } else {
-        merge_sequences_with_rc(assembled_sequences, false)
-    };
-
-    write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement, total_length)?;
-    println!("Results written to {}", config.output_path.display());
-
-    Ok(())
+// helpfer functions
+//
+/// Compute the reverse complement of a DNA sequence
+fn reverse_complement(seq: &[u8]) -> Vec<u8> {
+    seq.iter()
+        .rev()
+        .map(|&base| match base.to_ascii_uppercase() {
+            b'A' => b'T',
+            b'T' => b'A',
+            b'G' => b'C',
+            b'C' => b'G',
+            _ => base, // Keep ambiguous bases as-is
+        })
+        .collect()
 }
 
+/// Check if a k-mer is a homopolymer (>80% same base)
+fn is_homopolymer(kmer: &[u8]) -> bool {
+    if kmer.is_empty() {
+        return false;
+    }
+    
+    let mut counts = [0; 4]; // A, T, G, C
+    for &base in kmer {
+        match base.to_ascii_uppercase() {
+            b'A' => counts[0] += 1,
+            b'T' => counts[1] += 1,
+            b'G' => counts[2] += 1,
+            b'C' => counts[3] += 1,
+            _ => {} // Skip ambiguous bases
+        }
+    }
+    
+    let max_count = counts.iter().max().unwrap_or(&0);
+    let threshold = (kmer.len() as f64 * 0.8) as usize;
+    *max_count >= threshold
+}
+
+// K-mer processing
+// 
 fn count_kmers_with_min_count(
     records: &[SequenceRecord], 
     k: usize, 
@@ -459,28 +409,9 @@ fn select_top_kmers(
     
     result
 }
-/// Check if a k-mer is a homopolymer (>80% same base)
-fn is_homopolymer(kmer: &[u8]) -> bool {
-    if kmer.is_empty() {
-        return false;
-    }
-    
-    let mut counts = [0; 4]; // A, T, G, C
-    for &base in kmer {
-        match base.to_ascii_uppercase() {
-            b'A' => counts[0] += 1,
-            b'T' => counts[1] += 1,
-            b'G' => counts[2] += 1,
-            b'C' => counts[3] += 1,
-            _ => {} // Skip ambiguous bases
-        }
-    }
-    
-    let max_count = counts.iter().max().unwrap_or(&0);
-    let threshold = (kmer.len() as f64 * 0.8) as usize;
-    *max_count >= threshold
-}
 
+// filtering & assembly
+//
 fn is_substring(sub: &[u8], main: &[u8]) -> bool {
     main.windows(sub.len()).any(|window| window == sub)
 }
@@ -539,84 +470,6 @@ fn filter_substrings(
         enriched_kmers.insert(k, surviving_kmers);
     }
     enriched_kmers
-}
-
-/// Check if a k-mer is a substring of any assembled sequence or their reverse complements
-/// This is needed when reverse complement merging has been applied to assembled sequences
-fn is_substring_of_assembled_sequences(
-    kmer: &[u8], 
-    assembled_results: &HashMap<Vec<u8>, MergeResult>,
-    check_reverse_complement: bool
-) -> bool {
-    for merge_result in assembled_results.values() {
-        // Check forward direction
-        if is_substring(kmer, &merge_result.sequence) {
-            return true;
-        }
-        
-        // Check reverse complement direction if requested
-        if check_reverse_complement {
-            let rc = reverse_complement(&merge_result.sequence);
-            if is_substring(kmer, &rc) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-
-/// Generic function to merge sequences with their reverse complements (version that handles stats)
-/// Works for both k-mers and assembled sequences
-fn merge_sequences_with_rc(
-    sequences: HashMap<Vec<u8>, u64>,
-    enable_merging: bool,
-) -> HashMap<Vec<u8>, MergeResult> {
-    let mut results = HashMap::new();
-    
-    if !enable_merging {
-        // No RC merging, convert to single results
-        for (seq, count) in sequences {
-            results.insert(seq.clone(), MergeResult::single(seq, count));
-        }
-        return results;
-    }
-    
-    let mut processed = std::collections::HashSet::new();
-    
-    for (seq, count) in &sequences {
-        if processed.contains(seq) {
-            continue;
-        }
-        
-        let rev_comp = reverse_complement(seq);
-        
-        // Check if we've already seen the reverse complement
-        if let Some(rc_count) = sequences.get(&rev_comp) {
-            if !processed.contains(&rev_comp) && seq != &rev_comp {
-                // Choose the lexicographically smaller sequence as canonical
-                let (canonical, forward_count, reverse_count) = if seq <= &rev_comp {
-                    (seq.clone(), *count, *rc_count)
-                } else {
-                    (rev_comp.clone(), *rc_count, *count)
-                };
-                
-                results.insert(
-                    canonical.clone(),
-                    MergeResult::merged(canonical, forward_count, reverse_count),
-                );
-                
-                processed.insert(seq.clone());
-                processed.insert(rev_comp);
-            }
-        } else {
-            // No reverse complement found, or it's a palindrome
-            results.insert(seq.clone(), MergeResult::single(seq.clone(), *count));
-            processed.insert(seq.clone());
-        }
-    }
-    
-    results
 }
 
 fn assemble_kmers(
@@ -757,35 +610,59 @@ fn assemble_kmers(
     assembled_sequences
 }
 
-/// Calculate statistics for assembled sequences based on their estimated count
-fn calculate_assembled_stats(sequence: &[u8], estimated_count: u64, total_length: usize) -> (f64, f64, f64) {
-    let k = sequence.len();
-    let total_possible_kmers = total_length.saturating_sub(k - 1);
-    let expected_count = total_possible_kmers as f64 / (4_f64.powi(k as i32));
+// Reverse complement
+//
+/// Generic function to merge sequences with their reverse complements (version that handles stats)
+/// Works for both k-mers and assembled sequences
+fn merge_sequences_with_rc(
+    sequences: HashMap<Vec<u8>, u64>,
+    enable_merging: bool,
+) -> HashMap<Vec<u8>, MergeResult> {
+    let mut results = HashMap::new();
     
-    // For assembled sequences, we use a smaller multiple testing correction factor
-    // since there are fewer assembled sequences than individual k-mers
-    let x = estimated_count as f64 / expected_count;
-    let h = x * x.ln() - x + 1.0;
-    let neg_log10_pvalue = estimated_count as f64 * h / std::f64::consts::LN_10;
+    if !enable_merging {
+        // No RC merging, convert to single results
+        for (seq, count) in sequences {
+            results.insert(seq.clone(), MergeResult::single(seq, count));
+        }
+        return results;
+    }
     
-    // Calculate square root deviance
-    let sqrt_deviance = if estimated_count as f64 > expected_count {
-        let deviance = 2.0 * (estimated_count as f64 * (estimated_count as f64 / expected_count).ln() - 
-                             (estimated_count as f64 - expected_count));
-        deviance.sqrt()
-    } else {
-        0.0
-    };
+    let mut processed = std::collections::HashSet::new();
     
-    // Calculate log fold enrichment
-    let log_fold_enrichment = if expected_count > 0.0 {
-        (estimated_count as f64 / expected_count).log2()
-    } else {
-        f64::INFINITY
-    };
+    for (seq, count) in &sequences {
+        if processed.contains(seq) {
+            continue;
+        }
+        
+        let rev_comp = reverse_complement(seq);
+        
+        // Check if we've already seen the reverse complement
+        if let Some(rc_count) = sequences.get(&rev_comp) {
+            if !processed.contains(&rev_comp) && seq != &rev_comp {
+                // Choose the lexicographically smaller sequence as canonical
+                let (canonical, forward_count, reverse_count) = if seq <= &rev_comp {
+                    (seq.clone(), *count, *rc_count)
+                } else {
+                    (rev_comp.clone(), *rc_count, *count)
+                };
+                
+                results.insert(
+                    canonical.clone(),
+                    MergeResult::merged(canonical, forward_count, reverse_count),
+                );
+                
+                processed.insert(seq.clone());
+                processed.insert(rev_comp);
+            }
+        } else {
+            // No reverse complement found, or it's a palindrome
+            results.insert(seq.clone(), MergeResult::single(seq.clone(), *count));
+            processed.insert(seq.clone());
+        }
+    }
     
-    (neg_log10_pvalue, sqrt_deviance, log_fold_enrichment)
+    results
 }
 
 fn merge_kmers_with_rc(
@@ -828,6 +705,61 @@ fn merge_kmers_with_rc(
     }
     
     results
+}
+
+/// Check if a k-mer is a substring of any assembled sequence or their reverse complements
+/// This is needed when reverse complement merging has been applied to assembled sequences
+fn is_substring_of_assembled_sequences(
+    kmer: &[u8], 
+    assembled_results: &HashMap<Vec<u8>, MergeResult>,
+    check_reverse_complement: bool
+) -> bool {
+    for merge_result in assembled_results.values() {
+        // Check forward direction
+        if is_substring(kmer, &merge_result.sequence) {
+            return true;
+        }
+        
+        // Check reverse complement direction if requested
+        if check_reverse_complement {
+            let rc = reverse_complement(&merge_result.sequence);
+            if is_substring(kmer, &rc) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Calculate statistics for assembled sequences based on their estimated count
+fn calculate_assembled_stats(sequence: &[u8], estimated_count: u64, total_length: usize) -> (f64, f64, f64) {
+    let k = sequence.len();
+    let total_possible_kmers = total_length.saturating_sub(k - 1);
+    let expected_count = total_possible_kmers as f64 / (4_f64.powi(k as i32));
+    
+    // For assembled sequences, we use a smaller multiple testing correction factor
+    // since there are fewer assembled sequences than individual k-mers
+    let x = estimated_count as f64 / expected_count;
+    let h = x * x.ln() - x + 1.0;
+    let neg_log10_pvalue = estimated_count as f64 * h / std::f64::consts::LN_10;
+    
+    // Calculate square root deviance
+    let sqrt_deviance = if estimated_count as f64 > expected_count {
+        let deviance = 2.0 * (estimated_count as f64 * (estimated_count as f64 / expected_count).ln() - 
+                             (estimated_count as f64 - expected_count));
+        deviance.sqrt()
+    } else {
+        0.0
+    };
+    
+    // Calculate log fold enrichment
+    let log_fold_enrichment = if expected_count > 0.0 {
+        (estimated_count as f64 / expected_count).log2()
+    } else {
+        f64::INFINITY
+    };
+    
+    (neg_log10_pvalue, sqrt_deviance, log_fold_enrichment)
 }
 
 fn write_report(
@@ -922,7 +854,7 @@ fn write_report(
                 "-inf".to_string()
             }
         } else {
-            format!("{:.1}", log_fold_enrichment)
+            format!("{log_fold_enrichment:.1}")
         };
         
         writer.write_record(&[
@@ -930,11 +862,88 @@ fn write_report(
             length.to_string(), 
             count, 
             source_k,
-            format!("{:.1}", sqrt_deviance),
+            format!("{sqrt_deviance:.1}"),
             formatted_log_fold,
         ])?;
     }
     writer.flush()?;
+    Ok(())
+}
+
+pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
+    // Create configuration from arguments (includes validation)
+    let config = KmerConfig::from_args(args)?;
+    
+    println!("Starting k-mer enrichment analysis...");
+    
+    // Collect k-values for processing
+    let k_values = config.k_values();
+    println!(
+        "Parameters: k_values={:?}, top_kmers={}, filter_method={}",
+        k_values,
+        config.top_kmers,
+        config.filter_method_description()
+    );
+
+    // Load sequences
+    println!("Loading sequences...");
+    let mut reader = SequenceReader::from_path(file_path)?;
+    let mut records = Vec::new();
+    let mut total_length = 0;
+    let mut index = 0;
+    while let Some(record) = reader.get_index(index)? {
+        total_length += record.seq().len();
+        records.push(record);
+        index += 1;
+    }
+    println!("Loaded {} sequences with total length {} bp", records.len(), total_length);
+
+    // K-mer counting and top-N selection
+    println!("K-mer counting and selection...");
+    let mut enriched_kmers = HashMap::new();
+    for &k in &k_values {
+        println!("Processing {k}-mers...");
+        let kmer_stats = if let Some(min_count) = config.min_count {
+            count_kmers_with_min_count(&records, k, min_count, total_length)
+        } else {
+            count_kmers_with_zscore_stats(&records, k, total_length, config.z_score_threshold)
+        };
+        println!("Found {} {k}-mers above threshold", kmer_stats.len());
+        
+        let selected_kmers = select_top_kmers(kmer_stats, k, config.top_kmers);
+        enriched_kmers.insert(k, selected_kmers);
+    }
+
+    // Cross-k substring filtering
+    println!("Substring filtering...");
+    let k_min = *k_values.first().unwrap();
+    let k_max = *k_values.last().unwrap();
+    let enriched_kmers = filter_substrings(enriched_kmers, k_min, k_max);
+
+    // Assembly and reporting
+    println!("Assembly and reporting...");
+    let mut assembled_sequences = HashMap::new();
+    if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
+        assembled_sequences = assemble_kmers(enriched_k_max, k_max);
+    }
+
+    // Optional post-assembly reverse complement merging
+    let assembled_results = if config.detect_reverse_complement {
+        println!("Merging reverse complement sequences...");
+        let original_count = assembled_sequences.len();
+        let merged_results = merge_sequences_with_rc(assembled_sequences, true);
+        let merged_count = merged_results.len();
+        if original_count != merged_count {
+            println!("  Merged {original_count} sequences to {merged_count} after reverse complement consolidation");
+        }
+        merged_results
+    } else {
+        merge_sequences_with_rc(assembled_sequences, false)
+    };
+
+    write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement, total_length)?;
+    println!("Results written to {}", config.output_path.display());
+
     Ok(())
 }
 
