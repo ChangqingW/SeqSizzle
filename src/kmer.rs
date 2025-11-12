@@ -6,8 +6,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::ops::Range;
 
-const SUBSTRING_COUNT_RATIO_THRESHOLD: f64 = 0.8; // Threshold for substring filtering
-
 /// Statistics for a k-mer including enrichment metrics
 #[derive(Debug, Clone)]
 pub struct KmerStats {
@@ -125,6 +123,12 @@ pub struct KmerEnrichmentArgs {
     #[clap(long, default_value_t = 200)]
     pub top_kmers: usize,
 
+    /// Substring filtering counts ratio threshold.
+    /// For k-mers that are contained within longer k-mers, those with
+    /// (shorter k-mer count) / (longer k-mer count) >= this threshold will be removed.
+    #[clap(long, default_value_t = 0.8)]
+    pub substring_count_ratio_threshold: f64,
+
     /// Minimum count threshold for k-mers (overrides z-score if provided).
     #[clap(long)]
     pub min_count: Option<u64>,
@@ -132,6 +136,10 @@ pub struct KmerEnrichmentArgs {
     /// Z-score threshold for k-mer enrichment (default: 5.0).
     #[clap(long, default_value_t = 5.0)]
     pub z_score_threshold: f64,
+
+    // Perform assembly with k_max k-mers
+    #[clap(long, default_value_t = true)]
+    pub assemble: bool,
 
     /// Detect and merge reverse complement k-mers.
     #[clap(long)]
@@ -145,9 +153,11 @@ pub struct KmerConfig {
     pub k_range: Range<usize>,
     pub k_step: usize,
     pub top_kmers: usize,
+    pub substring_count_ratio_threshold: f64,
     pub z_score_threshold: f64,
     pub min_count: Option<u64>,
     pub output_path: PathBuf,
+    pub assemble: bool,
     pub detect_reverse_complement: bool,
 }
 
@@ -167,9 +177,11 @@ impl KmerConfig {
             k_range: args.k_min..args.k_max + 1,
             k_step: args.k_step,
             top_kmers: args.top_kmers,
+            substring_count_ratio_threshold: args.substring_count_ratio_threshold,
             z_score_threshold: args.z_score_threshold,
             min_count: args.min_count,
             output_path,
+            assemble: args.assemble,
             detect_reverse_complement: args.detect_reverse_complement,
         })
     }
@@ -331,8 +343,8 @@ fn count_kmers_with_zscore_stats(
     let total_possible_kmers = total_length.saturating_sub(k - 1);
     let expected_frequency = total_possible_kmers as f64 / (4_f64.powi(k as i32));
     
-    // For Poisson distribution: variance = mean
-    let expected_std = expected_frequency.sqrt();
+    // For Binomial distribution, std = sqrt(n * p * (1 - p))
+    let expected_std = (expected_frequency * (1.0 - (1.0 / 4_f64.powi(k as i32)))).sqrt();
     let min_count_threshold = (expected_frequency + z_threshold * expected_std).ceil() as u64;
     
     println!("  Expected frequency: {expected_frequency:.2}, std: {expected_std:.2}, min_count (Z≥{z_threshold:.1}): {min_count_threshold}");
@@ -418,12 +430,12 @@ fn is_substring(sub: &[u8], main: &[u8]) -> bool {
 
 fn filter_substrings(
     mut enriched_kmers: HashMap<usize, HashMap<Vec<u8>, KmerStats>>,
-    _k_min: usize,
-    k_max: usize,
+    threshold: f64,
 ) -> HashMap<usize, HashMap<Vec<u8>, KmerStats>> {
     // Get all k-values that are actually present (in case of step > 1)
     let mut k_values: Vec<usize> = enriched_kmers.keys().copied().collect();
     k_values.sort();
+    let k_max = k_values.last().unwrap().clone();
     
     // Process in increasing k order: k_min to k_max-1
     // This ensures shorter k-mers are filtered out by longer ones iteratively
@@ -451,7 +463,12 @@ fn filter_substrings(
                             long_kmers.iter().any(|(kmer_long, stats_long)| {
                                 let ratio = stats_long.observed_count as f64 / stats_short.observed_count as f64;
                                 let is_sub = is_substring(kmer_short, kmer_long);
-                                ratio >= SUBSTRING_COUNT_RATIO_THRESHOLD && is_sub
+                                // if both are homopolymers, use threshold^4
+                                if is_homopolymer(kmer_short) && is_homopolymer(kmer_long) {
+                                    ratio >= threshold.powi(4) && is_sub
+                                } else {
+                                    ratio >= threshold && is_sub
+                                }
                             })
                         } else {
                             false
@@ -486,10 +503,6 @@ fn assemble_kmers(
 
     let kmers: Vec<_> = enriched_kmers.keys().collect();
     
-    // Find valid overlaps between k-mers
-    // Only consider overlaps of at least k/2 length to avoid spurious connections
-    let min_overlap = (k / 2).max(3);
-    
     for &kmer_a in &kmers {
         for &kmer_b in &kmers {
             if kmer_a == kmer_b {
@@ -500,38 +513,35 @@ fn assemble_kmers(
             let stats_b = enriched_kmers.get(kmer_b).unwrap();
             
             // Check if counts are reasonably compatible
-            // Allow more variation but still require some similarity
-            if (stats_b.observed_count as f64) < (stats_a.observed_count as f64 * 0.3) || 
-               (stats_b.observed_count as f64) > (stats_a.observed_count as f64 * 3.0) {
+            // if the counts are not within 10% of each other, skip
+            if (stats_b.observed_count as f64) < (stats_a.observed_count as f64 * 0.9) ||
+               (stats_a.observed_count as f64) < (stats_b.observed_count as f64 * 0.9) {
+                continue;
+            }
+
+            // overlapping part could not be homopolymer
+            if is_homopolymer(&kmer_a[1..]) {
                 continue;
             }
             
-            // Find significant overlaps: kmer_a suffix matches kmer_b prefix
-            let max_overlap = (kmer_a.len() - 1).min(kmer_b.len() - 1);
-            for overlap_len in (min_overlap..=max_overlap).rev() {
-                let suffix = &kmer_a[kmer_a.len() - overlap_len..];
-                let prefix = &kmer_b[..overlap_len];
-                
-                if suffix == prefix {
-                    // Found a valid significant overlap
-                    graph.entry(kmer_a.clone()).or_default().push(kmer_b.clone());
-                    reverse_graph.entry(kmer_b.clone()).or_default().push(kmer_a.clone());
-                    break; // Take the longest overlap
-                }
+            if kmer_a[1..] == kmer_b[..k-1] {
+                // Found a sliding overlap (length k-1)
+                graph.entry(kmer_a.clone()).or_default().push(kmer_b.clone());
+                reverse_graph.entry(kmer_b.clone()).or_default().push(kmer_a.clone());
+                break;
             }
         }
     }
 
     // Find start nodes (nodes with no incoming edges or weak incoming edges)
-    let mut start_nodes: Vec<_> = enriched_kmers.keys()
+    let start_nodes: Vec<_> = enriched_kmers.keys()
         .filter(|kmer| !reverse_graph.contains_key(*kmer))
         .collect();
     
     // If no clear start nodes, pick nodes with highest counts as potential starts
     if start_nodes.is_empty() {
-        let mut kmer_counts: Vec<_> = enriched_kmers.iter().collect();
-        kmer_counts.sort_by(|a, b| b.1.observed_count.cmp(&a.1.observed_count));
-        start_nodes = kmer_counts.into_iter().take(5).map(|(k, _)| k).collect();
+        println!("  No clear start nodes found for assembly, skipping assembly.");
+        return HashMap::new();
     }
 
     let mut assembled_sequences = HashMap::new();
@@ -541,61 +551,37 @@ fn assemble_kmers(
         if processed.contains(start_node) {
             continue;
         }
-
+        
         let mut path = vec![start_node.clone()];
         let mut current_node = start_node.clone();
+        let mut diverged = false;
         processed.insert(current_node.clone());
 
         // Follow linear paths, being more permissive about branching
         while let Some(neighbors) = graph.get(&current_node) {
-            // Pick the best next neighbor (highest count among unprocessed)
-            let mut best_next = None;
-            let mut best_count = 0;
             
-            for next_node in neighbors {
-                if !processed.contains(next_node) {
-                    let count = enriched_kmers.get(next_node).unwrap().observed_count;
-                    if count > best_count {
-                        best_count = count;
-                        best_next = Some(next_node);
-                    }
-                }
-            }
-            
-            if let Some(next_node) = best_next {
-                path.push(next_node.clone());
-                processed.insert(next_node.clone());
-                current_node = next_node.clone();
-            } else {
+            // Only assemble non-diverging paths
+            if neighbors.len() != 1 {
+                diverged = true;
                 break;
             }
+            let next_node = &neighbors[0];
+            path.push(next_node.clone());
+            processed.insert(next_node.clone());
+            current_node = next_node.clone();
         }
 
         // Keep sequences with multiple k-mers
-        if path.len() > 1 {
+        if path.len() > 1 && !diverged {
             // Reconstruct the sequence by finding actual overlaps
             let mut assembled_seq = path[0].clone();
             let mut total_count = enriched_kmers.get(&path[0]).unwrap().observed_count;
             
             for i in 1..path.len() {
-                let prev_kmer = &path[i-1];
                 let curr_kmer = &path[i];
                 
-                // Find the overlap length between consecutive k-mers
-                let max_overlap = (prev_kmer.len() - 1).min(curr_kmer.len() - 1);
-                let mut overlap_len = 1;
-                
-                for ol in (min_overlap..=max_overlap).rev() {
-                    let suffix = &prev_kmer[prev_kmer.len() - ol..];
-                    let prefix = &curr_kmer[..ol];
-                    if suffix == prefix {
-                        overlap_len = ol;
-                        break;
-                    }
-                }
-                
                 // Append the non-overlapping part of current k-mer
-                assembled_seq.extend_from_slice(&curr_kmer[overlap_len..]);
+                assembled_seq.push(curr_kmer[k-1]);
                 total_count += enriched_kmers.get(curr_kmer).unwrap().observed_count;
             }
             
@@ -918,13 +904,15 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     println!("Substring filtering...");
     let k_min = *k_values.first().unwrap();
     let k_max = *k_values.last().unwrap();
-    let enriched_kmers = filter_substrings(enriched_kmers, k_min, k_max);
+    let enriched_kmers = filter_substrings(enriched_kmers, config.substring_count_ratio_threshold);
 
     // Assembly and reporting
-    println!("Assembly and reporting...");
     let mut assembled_sequences = HashMap::new();
-    if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
-        assembled_sequences = assemble_kmers(enriched_k_max, k_max);
+    if config.assemble {
+        println!("Assembly and reporting...");
+        if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
+            assembled_sequences = assemble_kmers(enriched_k_max, k_max);
+        }
     }
 
     // Optional post-assembly reverse complement merging
@@ -976,7 +964,7 @@ mod tests {
         enriched.insert(8, k8);
         enriched.insert(9, k9);
 
-        let filtered = filter_substrings(enriched, 8, 9);
+        let filtered = filter_substrings(enriched, 0.8);
         assert!(filtered.get(&8).unwrap().is_empty());
         assert_eq!(filtered.get(&9).unwrap().len(), 1);
     }
@@ -991,7 +979,7 @@ mod tests {
         enriched.insert(8, k8);
         enriched.insert(9, k9);
 
-        let filtered = filter_substrings(enriched, 8, 9);
+        let filtered = filter_substrings(enriched, 0.8);
         assert_eq!(filtered.get(&8).unwrap().len(), 1);
         assert_eq!(filtered.get(&9).unwrap().len(), 1);
     }
