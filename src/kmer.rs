@@ -12,7 +12,6 @@ pub struct KmerStats {
     pub sequence: Vec<u8>,
     pub observed_count: u64,
     pub expected_count: f64,
-    pub neg_log10_pvalue: f64,
     pub sqrt_deviance: f64,
     pub log_fold_enrichment: f64,
 }
@@ -25,10 +24,6 @@ impl KmerStats {
         expected_count: f64,
         // total_sequences: usize, // for multiple testing correction
     ) -> Self {
-        
-        let x = observed_count as f64 / expected_count;
-        let h = x * x.ln() - x + 1.0;
-        let neg_log10_pvalue = expected_count * h / std::f64::consts::LN_10;
         
         // Calculate square root deviance (0 if observed <= expected)
         let sqrt_deviance = if observed_count as f64 > expected_count {
@@ -50,7 +45,6 @@ impl KmerStats {
             sequence,
             observed_count,
             expected_count,
-            neg_log10_pvalue,
             sqrt_deviance,
             log_fold_enrichment,
         }
@@ -129,17 +123,18 @@ pub struct KmerEnrichmentArgs {
     #[clap(long, default_value_t = 0.8)]
     pub substring_count_ratio_threshold: f64,
 
-    /// Minimum count threshold for k-mers (overrides z-score if provided).
+    /// Minimum counts per read threshold for k-mers (overrides z-score if provided).
+    /// Accepts fractional values (e.g., 0.01 for 1 count per 100 reads).
     #[clap(long)]
-    pub min_count: Option<u64>,
+    pub min_count: Option<f64>,
 
     /// Z-score threshold for k-mer enrichment (default: 5.0).
     #[clap(long, default_value_t = 5.0)]
     pub z_score_threshold: f64,
 
-    // Perform assembly with k_max k-mers
-    #[clap(long, default_value_t = true)]
-    pub assemble: bool,
+    /// Perform assembly with k_max k-mers
+    #[clap(long, default_value_t = false)]
+    pub skip_assemble: bool,
 
     /// Detect and merge reverse complement k-mers.
     #[clap(long)]
@@ -155,7 +150,7 @@ pub struct KmerConfig {
     pub top_kmers: usize,
     pub substring_count_ratio_threshold: f64,
     pub z_score_threshold: f64,
-    pub min_count: Option<u64>,
+    pub min_count: Option<f64>,
     pub output_path: PathBuf,
     pub assemble: bool,
     pub detect_reverse_complement: bool,
@@ -181,7 +176,7 @@ impl KmerConfig {
             z_score_threshold: args.z_score_threshold,
             min_count: args.min_count,
             output_path,
-            assemble: args.assemble,
+            assemble: !args.skip_assemble,
             detect_reverse_complement: args.detect_reverse_complement,
         })
     }
@@ -514,8 +509,8 @@ fn assemble_kmers(
             
             // Check if counts are reasonably compatible
             // if the counts are not within 10% of each other, skip
-            if (stats_b.observed_count as f64) < (stats_a.observed_count as f64 * 0.9) ||
-               (stats_a.observed_count as f64) < (stats_b.observed_count as f64 * 0.9) {
+            if (stats_b.observed_count as f64) < (stats_a.observed_count as f64 * 0.8) ||
+               (stats_a.observed_count as f64) < (stats_b.observed_count as f64 * 0.8) {
                 continue;
             }
 
@@ -654,7 +649,8 @@ fn merge_sequences_with_rc(
 fn merge_kmers_with_rc(
     enriched_kmers: &HashMap<Vec<u8>, KmerStats>,
     rc_merging_applied: bool,
-) -> Vec<(String, usize, String, String, f64, f64, f64)> {
+    read_count: usize,
+) -> Vec<(String, usize, String, f64, String, f64, f64)> {
     // Convert KmerStats to counts for merging, preserving the original stats
     let kmer_counts: HashMap<Vec<u8>, u64> = enriched_kmers
         .iter()
@@ -672,19 +668,19 @@ fn merge_kmers_with_rc(
                 enriched_kmers.get(&rev_comp)
             });
         
-        let (neg_log10_pvalue, sqrt_deviance, log_fold_enrichment) = if let Some(stats) = original_stats {
-            (stats.neg_log10_pvalue, stats.sqrt_deviance, stats.log_fold_enrichment)
+        let (sqrt_deviance, log_fold_enrichment) = if let Some(stats) = original_stats {
+            (stats.sqrt_deviance, stats.log_fold_enrichment)
         } else {
             // Fallback for merged sequences - calculate basic stats
-            (0.0, 0.0, 0.0)
+            (0.0, 0.0)
         };
         
         results.push((
             String::from_utf8_lossy(&merge_result.sequence).into_owned(),
             merge_result.sequence.len(),
             merge_result.format_count(),
+            merge_result.total_count as f64 / read_count as f64,
             "".to_string(), // source_k will be filled by caller
-            neg_log10_pvalue,
             sqrt_deviance,
             log_fold_enrichment,
         ));
@@ -718,16 +714,10 @@ fn is_substring_of_assembled_sequences(
 }
 
 /// Calculate statistics for assembled sequences based on their estimated count
-fn calculate_assembled_stats(sequence: &[u8], estimated_count: u64, total_length: usize) -> (f64, f64, f64) {
+fn calculate_assembled_stats(sequence: &[u8], estimated_count: u64, total_length: usize) -> (f64, f64) {
     let k = sequence.len();
     let total_possible_kmers = total_length.saturating_sub(k - 1);
     let expected_count = total_possible_kmers as f64 / (4_f64.powi(k as i32));
-    
-    // For assembled sequences, we use a smaller multiple testing correction factor
-    // since there are fewer assembled sequences than individual k-mers
-    let x = estimated_count as f64 / expected_count;
-    let h = x * x.ln() - x + 1.0;
-    let neg_log10_pvalue = estimated_count as f64 * h / std::f64::consts::LN_10;
     
     // Calculate square root deviance
     let sqrt_deviance = if estimated_count as f64 > expected_count {
@@ -745,7 +735,7 @@ fn calculate_assembled_stats(sequence: &[u8], estimated_count: u64, total_length
         f64::INFINITY
     };
     
-    (neg_log10_pvalue, sqrt_deviance, log_fold_enrichment)
+    (sqrt_deviance, log_fold_enrichment)
 }
 
 fn write_report(
@@ -756,21 +746,22 @@ fn write_report(
     k_max: usize,
     rc_merging_applied: bool,
     total_length: usize,
+    read_count: usize,
 ) -> Result<()> {
     let mut all_results = Vec::new();
 
     // Handle assembled sequences with consistent formatting
     for merge_result in assembled_results.values() {
         // Calculate statistics for assembled sequences based on their estimated count
-        let (neg_log10_pvalue, sqrt_deviance, log_fold_enrichment) = 
+        let (sqrt_deviance, log_fold_enrichment) = 
             calculate_assembled_stats(&merge_result.sequence, merge_result.total_count, total_length);
         
         all_results.push((
             String::from_utf8_lossy(&merge_result.sequence).into_owned(),
             merge_result.sequence.len(),
             merge_result.format_count(),
+            merge_result.total_count as f64 / read_count as f64,
             format!("assembled from k={k_max}"),
-            neg_log10_pvalue,
             sqrt_deviance,
             log_fold_enrichment,
         ));
@@ -778,7 +769,7 @@ fn write_report(
 
     // Handle k-mers from k_max, with RC merging if applicable
     if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
-        let mut kmer_results = merge_kmers_with_rc(enriched_k_max, rc_merging_applied);
+        let mut kmer_results = merge_kmers_with_rc(enriched_k_max, rc_merging_applied, read_count);
         
         // Filter out k-mers that are substrings of assembled sequences
         kmer_results.retain(|(kmer_str, _, _, _, _, _, _)| {
@@ -787,7 +778,7 @@ fn write_report(
         });
         
         // Set the source_k for these results
-        for (_, _, _, source_k, _, _, _) in kmer_results.iter_mut() {
+        for (_, _, _, _, source_k, _, _) in kmer_results.iter_mut() {
             *source_k = k_max.to_string();
         }
         
@@ -797,7 +788,7 @@ fn write_report(
     // Handle k-mers from smaller k values, with RC merging if applicable
     for k in (k_min..k_max).rev() {
         if let Some(enriched_k) = enriched_kmers.get(&k) {
-            let mut kmer_results = merge_kmers_with_rc(enriched_k, rc_merging_applied);
+            let mut kmer_results = merge_kmers_with_rc(enriched_k, rc_merging_applied, read_count);
             
             // Filter out k-mers that are substrings of assembled sequences
             kmer_results.retain(|(kmer_str, _, _, _, _, _, _)| {
@@ -806,7 +797,7 @@ fn write_report(
             });
             
             // Set the source_k for these results
-            for (_, _, _, source_k, _, _, _) in kmer_results.iter_mut() {
+            for (_, _, _, _, source_k, _, _) in kmer_results.iter_mut() {
                 *source_k = k.to_string();
             }
             
@@ -821,17 +812,20 @@ fn write_report(
         dev_b.partial_cmp(&dev_a).unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // TODO: print top 10 unique and non-overlapping sequences to console
+
     let mut writer = csv::Writer::from_path(output_path)?;
     writer.write_record([
         "sequence", 
         "length", 
         "estimated_count", 
+        "counts_per_read",
         "source_k",
         "sqrt_deviance", 
         "log_fold_enrichment"
     ])?;
     
-    for (sequence, length, count, source_k, _, sqrt_deviance, log_fold_enrichment) in all_results {
+    for (sequence, length, count, counts_per_read, source_k, sqrt_deviance, log_fold_enrichment) in all_results {
         // neg_log10_pvalue too large, not very useful
         let formatted_log_fold = if log_fold_enrichment.is_infinite() {
             if log_fold_enrichment.is_sign_positive() {
@@ -847,6 +841,7 @@ fn write_report(
             sequence, 
             length.to_string(), 
             count, 
+            format!("{counts_per_read:.2}"),
             source_k,
             format!("{sqrt_deviance:.1}"),
             formatted_log_fold,
@@ -882,7 +877,8 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
         records.push(record);
         index += 1;
     }
-    println!("Loaded {} sequences with total length {} bp", records.len(), total_length);
+    let read_count = records.len();
+    println!("Loaded {} sequences with total length {} bp", read_count, total_length);
 
     // K-mer counting and top-N selection
     println!("K-mer counting and selection...");
@@ -890,7 +886,11 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     for &k in &k_values {
         println!("Processing {k}-mers...");
         let kmer_stats = if let Some(min_count) = config.min_count {
-            count_kmers_with_min_count(&records, k, min_count, total_length)
+            count_kmers_with_min_count(
+                &records, k,
+                (min_count * read_count as f64).ceil() as u64,
+                total_length
+            )
         } else {
             count_kmers_with_zscore_stats(&records, k, total_length, config.z_score_threshold)
         };
@@ -906,10 +906,10 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     let k_max = *k_values.last().unwrap();
     let enriched_kmers = filter_substrings(enriched_kmers, config.substring_count_ratio_threshold);
 
-    // Assembly and reporting
+    // Assembly
     let mut assembled_sequences = HashMap::new();
     if config.assemble {
-        println!("Assembly and reporting...");
+        println!("Assembly ...");
         if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
             assembled_sequences = assemble_kmers(enriched_k_max, k_max);
         }
@@ -929,7 +929,7 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
         merge_sequences_with_rc(assembled_sequences, false)
     };
 
-    write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement, total_length)?;
+    write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement, total_length, read_count)?;
     println!("Results written to {}", config.output_path.display());
 
     Ok(())
