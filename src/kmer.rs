@@ -49,6 +49,75 @@ impl KmerStats {
             log_fold_enrichment,
         }
     }
+    
+    /// Calculate expected count for a sequence of given length
+    fn calculate_expected_count(sequence_length: usize, total_length: usize) -> f64 {
+        let total_possible = total_length.saturating_sub(sequence_length - 1);
+        total_possible as f64 / (4_f64.powi(sequence_length as i32))
+    }
+    
+    /// Create stats from observed count and total length
+    fn from_count(sequence: Vec<u8>, observed_count: u64, total_length: usize) -> Self {
+        let expected = Self::calculate_expected_count(sequence.len(), total_length);
+        Self::new(sequence, observed_count, expected)
+    }
+}
+
+/// Source of an enriched sequence
+#[derive(Debug, Clone)]
+pub enum SequenceSource {
+    /// K-mer from a specific k-value
+    Kmer(usize),
+    /// Assembled sequence from k-mers of a specific k-value
+    Assembled { from_k: usize },
+}
+
+impl SequenceSource {
+    /// Format the source for CSV output
+    fn format_for_csv(&self) -> String {
+        match self {
+            SequenceSource::Kmer(k) => k.to_string(),
+            SequenceSource::Assembled { from_k } => format!("assembled from k={from_k}"),
+        }
+    }
+}
+
+/// Represents an enriched sequence with all its metadata for output
+#[derive(Debug, Clone)]
+pub struct EnrichedSequence {
+    pub sequence: String,
+    pub length: usize,
+    pub count_display: String,
+    pub counts_per_read: f64,
+    pub source: SequenceSource,
+    pub sqrt_deviance: f64,
+    pub log_fold_enrichment: f64,
+}
+
+impl EnrichedSequence {
+    /// Write this sequence to a CSV writer
+    fn write_to_csv<W: std::io::Write>(&self, writer: &mut csv::Writer<W>) -> Result<()> {
+        let formatted_log_fold = if self.log_fold_enrichment.is_infinite() {
+            if self.log_fold_enrichment.is_sign_positive() {
+                "inf".to_string()
+            } else {
+                "-inf".to_string()
+            }
+        } else {
+            format!("{:.1}", self.log_fold_enrichment)
+        };
+        
+        writer.write_record(&[
+            &self.sequence,
+            &self.length.to_string(),
+            &self.count_display,
+            &format!("{:.2}", self.counts_per_read),
+            &self.source.format_for_csv(),
+            &format!("{:.1}", self.sqrt_deviance),
+            &formatted_log_fold,
+        ])?;
+        Ok(())
+    }
 }
 
 /// Result of merging sequences with their reverse complements
@@ -58,29 +127,29 @@ pub struct MergeResult {
     pub total_count: u64,
     pub forward_count: Option<u64>,  // Some if merged, None if single
     pub reverse_count: Option<u64>,  // Some if merged, None if single
-    pub stats: Option<KmerStats>,    // Statistical information
+    pub stats: KmerStats,            // Statistical information (always present)
 }
 
 impl MergeResult {
     /// Create a result for a single sequence (not merged)
-    fn single(sequence: Vec<u8>, count: u64) -> Self {
+    fn single(sequence: Vec<u8>, count: u64, stats: KmerStats) -> Self {
         Self {
             sequence,
             total_count: count,
             forward_count: None,
             reverse_count: None,
-            stats: None,
+            stats,
         }
     }
     
     /// Create a result for merged sequences
-    fn merged(sequence: Vec<u8>, forward_count: u64, reverse_count: u64) -> Self {
+    fn merged(sequence: Vec<u8>, forward_count: u64, reverse_count: u64, stats: KmerStats) -> Self {
         Self {
             sequence,
             total_count: forward_count + reverse_count,
             forward_count: Some(forward_count),
             reverse_count: Some(reverse_count),
-            stats: None,
+            stats,
         }
     }
     
@@ -91,6 +160,19 @@ impl MergeResult {
                 format!("{} (+{}-{})", self.total_count, forward, reverse)
             }
             _ => self.total_count.to_string(),
+        }
+    }
+    
+    /// Convert to EnrichedSequence for output
+    pub fn to_enriched_sequence(&self, read_count: usize, source: SequenceSource) -> EnrichedSequence {
+        EnrichedSequence {
+            sequence: String::from_utf8_lossy(&self.sequence).into_owned(),
+            length: self.sequence.len(),
+            count_display: self.format_count(),
+            counts_per_read: self.total_count as f64 / read_count as f64,
+            source,
+            sqrt_deviance: self.stats.sqrt_deviance,
+            log_fold_enrichment: self.stats.log_fold_enrichment,
         }
     }
 }
@@ -598,13 +680,15 @@ fn assemble_kmers(
 fn merge_sequences_with_rc(
     sequences: HashMap<Vec<u8>, u64>,
     enable_merging: bool,
+    total_length: usize,
 ) -> HashMap<Vec<u8>, MergeResult> {
     let mut results = HashMap::new();
     
     if !enable_merging {
         // No RC merging, convert to single results
         for (seq, count) in sequences {
-            results.insert(seq.clone(), MergeResult::single(seq, count));
+            let stats = KmerStats::from_count(seq.clone(), count, total_length);
+            results.insert(seq.clone(), MergeResult::single(seq, count, stats));
         }
         return results;
     }
@@ -628,9 +712,12 @@ fn merge_sequences_with_rc(
                     (rev_comp.clone(), *rc_count, *count)
                 };
                 
+                let total = forward_count + reverse_count;
+                let stats = KmerStats::from_count(canonical.clone(), total, total_length);
+                
                 results.insert(
                     canonical.clone(),
-                    MergeResult::merged(canonical, forward_count, reverse_count),
+                    MergeResult::merged(canonical, forward_count, reverse_count, stats),
                 );
                 
                 processed.insert(seq.clone());
@@ -638,7 +725,8 @@ fn merge_sequences_with_rc(
             }
         } else {
             // No reverse complement found, or it's a palindrome
-            results.insert(seq.clone(), MergeResult::single(seq.clone(), *count));
+            let stats = KmerStats::from_count(seq.clone(), *count, total_length);
+            results.insert(seq.clone(), MergeResult::single(seq.clone(), *count, stats));
             processed.insert(seq.clone());
         }
     }
@@ -650,43 +738,22 @@ fn merge_kmers_with_rc(
     enriched_kmers: &HashMap<Vec<u8>, KmerStats>,
     rc_merging_applied: bool,
     read_count: usize,
-) -> Vec<(String, usize, String, f64, String, f64, f64)> {
-    // Convert KmerStats to counts for merging, preserving the original stats
+    total_length: usize,
+    source: SequenceSource,
+) -> Vec<EnrichedSequence> {
+    // Convert KmerStats to counts for merging
     let kmer_counts: HashMap<Vec<u8>, u64> = enriched_kmers
         .iter()
         .map(|(k, stats)| (k.clone(), stats.observed_count))
         .collect();
     
-    let merged_results = merge_sequences_with_rc(kmer_counts, rc_merging_applied);
+    let merged_results = merge_sequences_with_rc(kmer_counts, rc_merging_applied, total_length);
     
-    let mut results = Vec::new();
-    for (seq, merge_result) in merged_results {
-        // Get the original stats for this sequence (or its reverse complement)
-        let original_stats = enriched_kmers.get(&seq)
-            .or_else(|| {
-                let rev_comp = reverse_complement(&seq);
-                enriched_kmers.get(&rev_comp)
-            });
-        
-        let (sqrt_deviance, log_fold_enrichment) = if let Some(stats) = original_stats {
-            (stats.sqrt_deviance, stats.log_fold_enrichment)
-        } else {
-            // Fallback for merged sequences - calculate basic stats
-            (0.0, 0.0)
-        };
-        
-        results.push((
-            String::from_utf8_lossy(&merge_result.sequence).into_owned(),
-            merge_result.sequence.len(),
-            merge_result.format_count(),
-            merge_result.total_count as f64 / read_count as f64,
-            "".to_string(), // source_k will be filled by caller
-            sqrt_deviance,
-            log_fold_enrichment,
-        ));
-    }
-    
-    results
+    // Convert MergeResults to EnrichedSequences
+    merged_results
+        .into_iter()
+        .map(|(_, result)| result.to_enriched_sequence(read_count, source.clone()))
+        .collect()
 }
 
 /// Check if a k-mer is a substring of any assembled sequence or their reverse complements
@@ -713,31 +780,6 @@ fn is_substring_of_assembled_sequences(
     false
 }
 
-/// Calculate statistics for assembled sequences based on their estimated count
-fn calculate_assembled_stats(sequence: &[u8], estimated_count: u64, total_length: usize) -> (f64, f64) {
-    let k = sequence.len();
-    let total_possible_kmers = total_length.saturating_sub(k - 1);
-    let expected_count = total_possible_kmers as f64 / (4_f64.powi(k as i32));
-    
-    // Calculate square root deviance
-    let sqrt_deviance = if estimated_count as f64 > expected_count {
-        let deviance = 2.0 * (estimated_count as f64 * (estimated_count as f64 / expected_count).ln() - 
-                             (estimated_count as f64 - expected_count));
-        deviance.sqrt()
-    } else {
-        0.0
-    };
-    
-    // Calculate log fold enrichment
-    let log_fold_enrichment = if expected_count > 0.0 {
-        (estimated_count as f64 / expected_count).log2()
-    } else {
-        f64::INFINITY
-    };
-    
-    (sqrt_deviance, log_fold_enrichment)
-}
-
 fn write_report(
     output_path: &Path,
     enriched_kmers: &HashMap<usize, HashMap<Vec<u8>, KmerStats>>,
@@ -748,39 +790,32 @@ fn write_report(
     total_length: usize,
     read_count: usize,
 ) -> Result<()> {
-    let mut all_results = Vec::new();
+    let mut all_results: Vec<EnrichedSequence> = Vec::new();
 
-    // Handle assembled sequences with consistent formatting
+    // Handle assembled sequences
     for merge_result in assembled_results.values() {
-        // Calculate statistics for assembled sequences based on their estimated count
-        let (sqrt_deviance, log_fold_enrichment) = 
-            calculate_assembled_stats(&merge_result.sequence, merge_result.total_count, total_length);
-        
-        all_results.push((
-            String::from_utf8_lossy(&merge_result.sequence).into_owned(),
-            merge_result.sequence.len(),
-            merge_result.format_count(),
-            merge_result.total_count as f64 / read_count as f64,
-            format!("assembled from k={k_max}"),
-            sqrt_deviance,
-            log_fold_enrichment,
-        ));
+        let enriched = merge_result.to_enriched_sequence(
+            read_count,
+            SequenceSource::Assembled { from_k: k_max }
+        );
+        all_results.push(enriched);
     }
 
     // Handle k-mers from k_max, with RC merging if applicable
     if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
-        let mut kmer_results = merge_kmers_with_rc(enriched_k_max, rc_merging_applied, read_count);
+        let mut kmer_results = merge_kmers_with_rc(
+            enriched_k_max,
+            rc_merging_applied,
+            read_count,
+            total_length,
+            SequenceSource::Kmer(k_max)
+        );
         
         // Filter out k-mers that are substrings of assembled sequences
-        kmer_results.retain(|(kmer_str, _, _, _, _, _, _)| {
-            let kmer = kmer_str.as_bytes();
+        kmer_results.retain(|enriched| {
+            let kmer = enriched.sequence.as_bytes();
             !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
         });
-        
-        // Set the source_k for these results
-        for (_, _, _, _, source_k, _, _) in kmer_results.iter_mut() {
-            *source_k = k_max.to_string();
-        }
         
         all_results.extend(kmer_results);
     }
@@ -788,28 +823,27 @@ fn write_report(
     // Handle k-mers from smaller k values, with RC merging if applicable
     for k in (k_min..k_max).rev() {
         if let Some(enriched_k) = enriched_kmers.get(&k) {
-            let mut kmer_results = merge_kmers_with_rc(enriched_k, rc_merging_applied, read_count);
+            let mut kmer_results = merge_kmers_with_rc(
+                enriched_k,
+                rc_merging_applied,
+                read_count,
+                total_length,
+                SequenceSource::Kmer(k)
+            );
             
             // Filter out k-mers that are substrings of assembled sequences
-            kmer_results.retain(|(kmer_str, _, _, _, _, _, _)| {
-                let kmer = kmer_str.as_bytes();
+            kmer_results.retain(|enriched| {
+                let kmer = enriched.sequence.as_bytes();
                 !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
             });
-            
-            // Set the source_k for these results
-            for (_, _, _, _, source_k, _, _) in kmer_results.iter_mut() {
-                *source_k = k.to_string();
-            }
             
             all_results.extend(kmer_results);
         }
     }
 
-    // Sort by sqrt_deviance
+    // Sort by sqrt_deviance (descending)
     all_results.sort_by(|a, b| {
-        let dev_a = a.5;
-        let dev_b = b.5;
-        dev_b.partial_cmp(&dev_a).unwrap_or(std::cmp::Ordering::Equal)
+        b.sqrt_deviance.partial_cmp(&a.sqrt_deviance).unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // TODO: print top 10 unique and non-overlapping sequences to console
@@ -825,28 +859,10 @@ fn write_report(
         "log_fold_enrichment"
     ])?;
     
-    for (sequence, length, count, counts_per_read, source_k, sqrt_deviance, log_fold_enrichment) in all_results {
-        // neg_log10_pvalue too large, not very useful
-        let formatted_log_fold = if log_fold_enrichment.is_infinite() {
-            if log_fold_enrichment.is_sign_positive() {
-                "inf".to_string()
-            } else {
-                "-inf".to_string()
-            }
-        } else {
-            format!("{log_fold_enrichment:.1}")
-        };
-        
-        writer.write_record(&[
-            sequence, 
-            length.to_string(), 
-            count, 
-            format!("{counts_per_read:.2}"),
-            source_k,
-            format!("{sqrt_deviance:.1}"),
-            formatted_log_fold,
-        ])?;
+    for enriched in all_results {
+        enriched.write_to_csv(&mut writer)?;
     }
+    
     writer.flush()?;
     Ok(())
 }
@@ -919,14 +935,14 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     let assembled_results = if config.detect_reverse_complement {
         println!("Merging reverse complement sequences...");
         let original_count = assembled_sequences.len();
-        let merged_results = merge_sequences_with_rc(assembled_sequences, true);
+        let merged_results = merge_sequences_with_rc(assembled_sequences, true, total_length);
         let merged_count = merged_results.len();
         if original_count != merged_count {
             println!("  Merged {original_count} sequences to {merged_count} after reverse complement consolidation");
         }
         merged_results
     } else {
-        merge_sequences_with_rc(assembled_sequences, false)
+        merge_sequences_with_rc(assembled_sequences, false, total_length)
     };
 
     write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement, total_length, read_count)?;
