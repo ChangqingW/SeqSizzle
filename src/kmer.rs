@@ -566,6 +566,14 @@ fn filter_substrings(
     enriched_kmers
 }
 
+/// Assemble k-mers into longer sequences by finding linear paths in an overlap graph.
+/// 
+/// This function is designed for identifying primer/adapter sequences where:
+/// - Branching indicates distinct sequences that should be kept separate
+/// - Assembly stops at any ambiguity (multiple outgoing edges)
+/// - Minimum count is used as a conservative estimate of sequence abundance
+/// 
+/// Returns a HashMap of assembled sequences with their minimum k-mer counts.
 fn assemble_kmers(
     enriched_kmers: &HashMap<Vec<u8>, KmerStats>,
     k: usize,
@@ -580,6 +588,16 @@ fn assemble_kmers(
 
     let kmers: Vec<_> = enriched_kmers.keys().collect();
     
+    // Debug: print k-mers being processed in tests
+    #[cfg(test)]
+    {
+        println!("Building graph for {} k-mers (k={})", kmers.len(), k);
+        for kmer in &kmers {
+            let stats = enriched_kmers.get(*kmer).unwrap();
+            println!("  {} (count={})", String::from_utf8_lossy(kmer), stats.observed_count);
+        }
+    }
+    
     for &kmer_a in &kmers {
         for &kmer_b in &kmers {
             if kmer_a == kmer_b {
@@ -590,22 +608,32 @@ fn assemble_kmers(
             let stats_b = enriched_kmers.get(kmer_b).unwrap();
             
             // Check if counts are reasonably compatible
-            // if the counts are not within 10% of each other, skip
+            // if the counts are not within 80% of each other, skip
             if (stats_b.observed_count as f64) < (stats_a.observed_count as f64 * 0.8) ||
                (stats_a.observed_count as f64) < (stats_b.observed_count as f64 * 0.8) {
+                #[cfg(test)]
+                println!("  Skipping {} -> {} (count mismatch: {} vs {})", 
+                         String::from_utf8_lossy(kmer_a), String::from_utf8_lossy(kmer_b),
+                         stats_a.observed_count, stats_b.observed_count);
                 continue;
             }
 
             // overlapping part could not be homopolymer
             if is_homopolymer(&kmer_a[1..]) {
+                #[cfg(test)]
+                println!("  Skipping {} -> {} (overlap is homopolymer)", 
+                         String::from_utf8_lossy(kmer_a), String::from_utf8_lossy(kmer_b));
                 continue;
             }
             
             if kmer_a[1..] == kmer_b[..k-1] {
                 // Found a sliding overlap (length k-1)
+                #[cfg(test)]
+                println!("  Found edge: {} -> {}", 
+                         String::from_utf8_lossy(kmer_a), String::from_utf8_lossy(kmer_b));
                 graph.entry(kmer_a.clone()).or_default().push(kmer_b.clone());
                 reverse_graph.entry(kmer_b.clone()).or_default().push(kmer_a.clone());
-                break;
+                // Continue to find all possible edges (don't break early)
             }
         }
     }
@@ -614,6 +642,9 @@ fn assemble_kmers(
     let start_nodes: Vec<_> = enriched_kmers.keys()
         .filter(|kmer| !reverse_graph.contains_key(*kmer))
         .collect();
+    
+    #[cfg(test)]
+    println!("Found {} start nodes", start_nodes.len());
     
     // If no clear start nodes, pick nodes with highest counts as potential starts
     if start_nodes.is_empty() {
@@ -631,44 +662,69 @@ fn assemble_kmers(
         
         let mut path = vec![start_node.clone()];
         let mut current_node = start_node.clone();
-        let mut diverged = false;
+        let mut visited_in_path = std::collections::HashSet::new();
+        visited_in_path.insert(current_node.clone());
         processed.insert(current_node.clone());
 
-        // Follow linear paths, being more permissive about branching
+        // Follow linear paths, stopping at branches or cycles
         while let Some(neighbors) = graph.get(&current_node) {
-            
             // Only assemble non-diverging paths
             if neighbors.len() != 1 {
-                diverged = true;
+                #[cfg(test)]
+                {
+                    println!("  Divergence at {}: {} outgoing edges", 
+                             String::from_utf8_lossy(&current_node), neighbors.len());
+                    for neighbor in neighbors {
+                        println!("    -> {}", String::from_utf8_lossy(neighbor));
+                    }
+                }
                 break;
             }
+            
             let next_node = &neighbors[0];
+            
+            // Cycle detection: if we've seen this node in the current path, stop
+            if visited_in_path.contains(next_node) {
+                break;
+            }
+            
             path.push(next_node.clone());
+            visited_in_path.insert(next_node.clone());
             processed.insert(next_node.clone());
             current_node = next_node.clone();
         }
 
-        // Keep sequences with multiple k-mers
-        if path.len() > 1 && !diverged {
+        // Keep sequences with multiple k-mers, even if diverged
+        // This captures the linear path up to the point of divergence
+        if path.len() > 1 {
             // Reconstruct the sequence by finding actual overlaps
             let mut assembled_seq = path[0].clone();
-            let mut total_count = enriched_kmers.get(&path[0]).unwrap().observed_count;
+            
+            // Collect all k-mer counts for this assembly
+            let kmer_counts: Vec<u64> = path.iter()
+                .map(|kmer| enriched_kmers.get(kmer).unwrap().observed_count)
+                .collect();
             
             for i in 1..path.len() {
                 let curr_kmer = &path[i];
-                
                 // Append the non-overlapping part of current k-mer
                 assembled_seq.push(curr_kmer[k-1]);
-                total_count += enriched_kmers.get(curr_kmer).unwrap().observed_count;
             }
             
-            let avg_count = total_count / path.len() as u64;
-            assembled_sequences.insert(assembled_seq, avg_count);
+            // Use minimum count (most conservative estimate for primer abundance)
+            let min_count = *kmer_counts.iter().min().unwrap();
+            assembled_sequences.insert(assembled_seq, min_count);
         }
     }
     
     if !assembled_sequences.is_empty() {
-        println!("  Assembly found {} sequences", assembled_sequences.len());
+        let lengths: Vec<usize> = assembled_sequences.keys().map(|s| s.len()).collect();
+        let avg_length = lengths.iter().sum::<usize>() as f64 / lengths.len() as f64;
+        let min_length = lengths.iter().min().unwrap();
+        let max_length = lengths.iter().max().unwrap();
+        
+        println!("  Assembly found {} sequences (length: min={}, max={}, avg={:.1})", 
+                 assembled_sequences.len(), min_length, max_length, avg_length);
     }
     assembled_sequences
 }
@@ -989,14 +1045,139 @@ mod tests {
     fn test_filter_substrings_no_removal() {
         let mut enriched = HashMap::new();
         let mut k8 = HashMap::new();
-        k8.insert(to_bytes("AAAAAAAA"), KmerStats::new(to_bytes("AAAAAAAA"), 100, 50.0));
+        // Use non-homopolymer sequences to avoid the threshold^4 rule
+        k8.insert(to_bytes("ATCGATCG"), KmerStats::new(to_bytes("ATCGATCG"), 100, 50.0));
         let mut k9 = HashMap::new();
-        k9.insert(to_bytes("AAAAAAAAA"), KmerStats::new(to_bytes("AAAAAAAAA"), 70, 25.0)); // 70 < 100 * 0.8
+        k9.insert(to_bytes("ATCGATCGA"), KmerStats::new(to_bytes("ATCGATCGA"), 70, 25.0)); // 70 < 100 * 0.8
         enriched.insert(8, k8);
         enriched.insert(9, k9);
 
         let filtered = filter_substrings(enriched, 0.8);
+        // Both should survive because count ratio is below threshold
         assert_eq!(filtered.get(&8).unwrap().len(), 1);
         assert_eq!(filtered.get(&9).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_assemble_kmers_simple_linear() {
+        // Test simple linear assembly with k=6 to avoid short overlap issues
+        // ATCGAT -> TCGATC -> CGATCG (overlaps: TCGAT, CGATC - not homopolymers)
+        let mut kmers = HashMap::new();
+        let k = 6;
+        kmers.insert(to_bytes("ATCGAT"), KmerStats::new(to_bytes("ATCGAT"), 100, 50.0));
+        kmers.insert(to_bytes("TCGATC"), KmerStats::new(to_bytes("TCGATC"), 95, 50.0));
+        kmers.insert(to_bytes("CGATCG"), KmerStats::new(to_bytes("CGATCG"), 90, 50.0));
+        
+        let assembled = assemble_kmers(&kmers, k);
+        
+        // Debug output
+        println!("Assembled sequences: {} results", assembled.len());
+        for (seq, count) in &assembled {
+            println!("  {} (count={})", String::from_utf8_lossy(seq), count);
+        }
+        
+        // Should assemble into "ATCGATCG" with min count of 90
+        assert_eq!(assembled.len(), 1, "Expected 1 assembled sequence, got {}", assembled.len());
+        assert!(assembled.contains_key(&to_bytes("ATCGATCG")), "Expected ATCGATCG but got: {:?}", 
+                assembled.keys().map(|k| String::from_utf8_lossy(k).to_string()).collect::<Vec<_>>());
+        assert_eq!(*assembled.get(&to_bytes("ATCGATCG")).unwrap(), 90); // minimum count
+    }
+
+    #[test]
+    fn test_assemble_kmers_stops_at_branch() {
+        // Test that assembly records sequence up to branching point with k=6
+        // ATCGAT -> TCGATC -> {CGATCA, CGATCG} (branch at TCGATC)
+        // Should assemble ATCGAT -> TCGATC and stop (producing "ATCGATC")
+        let mut kmers = HashMap::new();
+        let k = 6;
+        kmers.insert(to_bytes("ATCGAT"), KmerStats::new(to_bytes("ATCGAT"), 100, 50.0));
+        kmers.insert(to_bytes("TCGATC"), KmerStats::new(to_bytes("TCGATC"), 95, 50.0));
+        kmers.insert(to_bytes("CGATCA"), KmerStats::new(to_bytes("CGATCA"), 90, 50.0));
+        kmers.insert(to_bytes("CGATCG"), KmerStats::new(to_bytes("CGATCG"), 88, 50.0));
+        
+        let assembled = assemble_kmers(&kmers, k);
+        
+        // Should assemble ATCGAT -> TCGATC, stopping at the branch and recording this path
+        assert_eq!(assembled.len(), 1, "Expected 1 assembled sequence up to branch point");
+        // print the assembled sequences for debugging
+        for (seq, count) in &assembled {
+            println!("  {} (count={})", String::from_utf8_lossy(seq), count);
+        }
+        assert!(assembled.contains_key(&to_bytes("ATCGATC")), 
+                "Expected ATCGATC (assembled up to branch), got: {:?}",
+                assembled.keys().map(|k| String::from_utf8_lossy(k).to_string()).collect::<Vec<_>>());
+        // Count should be minimum of path (95 since ATCGAT=100, TCGATC=95)
+        assert_eq!(*assembled.get(&to_bytes("ATCGATC")).unwrap(), 95);
+    }
+
+    #[test]
+    fn test_assemble_kmers_count_mismatch() {
+        // Test that k-mers with very different counts are not connected
+        let mut kmers = HashMap::new();
+        let k = 6;
+        kmers.insert(to_bytes("ATCGAT"), KmerStats::new(to_bytes("ATCGAT"), 100, 50.0));
+        kmers.insert(to_bytes("TCGATC"), KmerStats::new(to_bytes("TCGATC"), 50, 50.0)); // 50 < 100 * 0.8
+        
+        let assembled = assemble_kmers(&kmers, k);
+        
+        // Should not assemble due to count mismatch
+        assert_eq!(assembled.len(), 0);
+    }
+
+    #[test]
+    fn test_assemble_kmers_multiple_paths_with_branches() {
+        // Test with multiple paths: 
+        // Path 1: GCTAGC -> CTAGCT -> TAGCTA (linear, should assemble fully to GCTAGCTA)
+        // Path 2: ATCGAT -> TCGATC -> {CGATCA, CGATCG} (branch, should assemble to ATCGATC)
+        let mut kmers = HashMap::new();
+        let k = 6;
+        
+        // Linear path
+        kmers.insert(to_bytes("GCTAGC"), KmerStats::new(to_bytes("GCTAGC"), 80, 50.0));
+        kmers.insert(to_bytes("CTAGCT"), KmerStats::new(to_bytes("CTAGCT"), 82, 50.0));
+        kmers.insert(to_bytes("TAGCTA"), KmerStats::new(to_bytes("TAGCTA"), 81, 50.0));
+        
+        // Branching path
+        kmers.insert(to_bytes("ATCGAT"), KmerStats::new(to_bytes("ATCGAT"), 100, 50.0));
+        kmers.insert(to_bytes("TCGATC"), KmerStats::new(to_bytes("TCGATC"), 95, 50.0));
+        kmers.insert(to_bytes("CGATCA"), KmerStats::new(to_bytes("CGATCA"), 90, 50.0));
+        kmers.insert(to_bytes("CGATCG"), KmerStats::new(to_bytes("CGATCG"), 88, 50.0));
+        
+        let assembled = assemble_kmers(&kmers, k);
+        
+        println!("Assembled sequences: {}", assembled.len());
+        for (seq, count) in &assembled {
+            println!("  {} (count={})", String::from_utf8_lossy(seq), count);
+        }
+        
+        // Should have 2 assembled sequences:
+        // 1. GCTAGCTA (linear path, full assembly)
+        // 2. ATCGATC (branching path, assembled up to branch point)
+        assert_eq!(assembled.len(), 2, "Expected 2 assembled sequences");
+        
+        assert!(assembled.contains_key(&to_bytes("GCTAGCTA")), 
+                "Expected GCTAGCTA from linear path");
+        assert_eq!(*assembled.get(&to_bytes("GCTAGCTA")).unwrap(), 80); // minimum of 80,82,81
+        
+        assert!(assembled.contains_key(&to_bytes("ATCGATC")), 
+                "Expected ATCGATC from branching path (up to divergence)");
+        assert_eq!(*assembled.get(&to_bytes("ATCGATC")).unwrap(), 95); // minimum of 100,95
+    }
+
+    #[test]
+    fn test_overlap_detection() {
+        // Debug test to verify overlap detection works with longer k-mers
+        let kmer_a = to_bytes("ATCGAT");
+        let kmer_b = to_bytes("TCGATC");
+        let k = 6;
+        
+        // Check if overlap exists: ATCGAT[1..] should be "TCGAT", TCGATC[..5] should be "TCGAT"
+        assert_eq!(&kmer_a[1..], &kmer_b[..k-1]);
+        
+        // Check homopolymer status of overlap
+        let overlap = &kmer_a[1..];
+        println!("Overlap: {:?}", String::from_utf8_lossy(overlap));
+        println!("Is homopolymer: {}", is_homopolymer(overlap));
+        assert!(!is_homopolymer(overlap), "TCGAT should not be a homopolymer");
     }
 }
