@@ -14,11 +14,12 @@ pub struct KmerStats {
     pub expected_count: f64,
     pub sqrt_deviance: f64,
     pub log_fold_enrichment: f64,
+    pub is_homopolymer: bool,
 }
 
 impl KmerStats {
     /// Create new k-mer statistics
-    fn new(
+    pub(crate) fn new(
         sequence: Vec<u8>, 
         observed_count: u64, 
         expected_count: f64,
@@ -41,12 +42,16 @@ impl KmerStats {
             f64::INFINITY
         };
         
+        // Calculate homopolymer status once
+        let is_homopolymer = is_homopolymer(&sequence);
+        
         Self {
             sequence,
             observed_count,
             expected_count,
             sqrt_deviance,
             log_fold_enrichment,
+            is_homopolymer,
         }
     }
     
@@ -347,7 +352,7 @@ fn reverse_complement(seq: &[u8]) -> Vec<u8> {
 }
 
 /// Check if a k-mer is a homopolymer (>80% same base)
-fn is_homopolymer(kmer: &[u8]) -> bool {
+pub(crate) fn is_homopolymer(kmer: &[u8]) -> bool {
     if kmer.is_empty() {
         return false;
     }
@@ -422,7 +427,7 @@ fn count_kmers_with_zscore_stats(
     
     // For Binomial distribution, std = sqrt(n * p * (1 - p))
     let expected_std = (expected_frequency * (1.0 - (1.0 / 4_f64.powi(k as i32)))).sqrt();
-    let min_count_threshold = (expected_frequency + z_threshold * expected_std).ceil() as u64;
+    let min_count_threshold = (expected_frequency + z_threshold * expected_std).ceil().max(2.0) as u64;
     
     println!("  Expected frequency: {expected_frequency:.2}, std: {expected_std:.2}, min_count (Z≥{z_threshold:.1}): {min_count_threshold}");
     
@@ -469,7 +474,7 @@ fn select_top_kmers(
     // Separate homopolymers from other sequences
     let (homopolymers, other_kmers): (Vec<_>, Vec<_>) = kmer_stats
         .iter()
-        .partition(|(kmer, _)| is_homopolymer(kmer));
+        .partition(|(_, stats)| stats.is_homopolymer);
 
     // Strategy: Keep some homopolymers, but focus on non-homopolymer sequences
     let max_homopolymers = (top_n / 10).clamp(4, 20); // 10% for homopolymers, 4-20 range
@@ -491,7 +496,7 @@ fn select_top_kmers(
         result.insert(kmer.clone(), stats.clone());
     }
     
-    let homo_count = result.iter().filter(|(kmer, _)| is_homopolymer(kmer)).count();
+    let homo_count = result.iter().filter(|(_, stats)| stats.is_homopolymer).count();
     let other_count = result.len() - homo_count;
     println!("  {} {k}-mers selected ({homo_count} homopolymers, {other_count} others)", 
         result.len());
@@ -541,7 +546,7 @@ fn filter_substrings(
                                 let ratio = stats_long.observed_count as f64 / stats_short.observed_count as f64;
                                 let is_sub = is_substring(kmer_short, kmer_long);
                                 // if both are homopolymers, use threshold^4
-                                if is_homopolymer(kmer_short) && is_homopolymer(kmer_long) {
+                                if stats_short.is_homopolymer && stats_long.is_homopolymer {
                                     ratio >= threshold.powi(4) && is_sub
                                 } else {
                                     ratio >= threshold && is_sub
@@ -574,26 +579,44 @@ fn filter_substrings(
 /// - Minimum count is used as a conservative estimate of sequence abundance
 /// 
 /// Returns a HashMap of assembled sequences with their minimum k-mer counts.
-fn assemble_kmers(
+pub(crate) fn assemble_kmers(
     enriched_kmers: &HashMap<Vec<u8>, KmerStats>,
     k: usize,
+    edge_join_threshold: f64,
 ) -> HashMap<Vec<u8>, u64> {
     if enriched_kmers.is_empty() {
         return HashMap::new();
+    }
+
+    // Filter out all homopolymer k-mers before assembly
+    let non_homopolymer_kmers: HashMap<Vec<u8>, KmerStats> = enriched_kmers
+        .iter()
+        .filter(|(_, stats)| !stats.is_homopolymer)
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    
+    if non_homopolymer_kmers.is_empty() {
+        println!("  All k-mers are homopolymers, skipping assembly.");
+        return HashMap::new();
+    }
+    
+    let filtered_count = enriched_kmers.len() - non_homopolymer_kmers.len();
+    if filtered_count > 0 {
+        println!("  Filtered out {} homopolymer k-mers from assembly", filtered_count);
     }
 
     // Build overlap graph with stricter overlap criteria
     let mut graph: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
     let mut reverse_graph: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
 
-    let kmers: Vec<_> = enriched_kmers.keys().collect();
+    let kmers: Vec<_> = non_homopolymer_kmers.keys().collect();
     
     // Debug: print k-mers being processed in tests
     #[cfg(test)]
     {
         println!("Building graph for {} k-mers (k={})", kmers.len(), k);
         for kmer in &kmers {
-            let stats = enriched_kmers.get(*kmer).unwrap();
+            let stats = non_homopolymer_kmers.get(*kmer).unwrap();
             println!("  {} (count={})", String::from_utf8_lossy(kmer), stats.observed_count);
         }
     }
@@ -604,33 +627,29 @@ fn assemble_kmers(
                 continue;
             }
             
-            let stats_a = enriched_kmers.get(kmer_a).unwrap();
-            let stats_b = enriched_kmers.get(kmer_b).unwrap();
+            let stats_a = non_homopolymer_kmers.get(kmer_a).unwrap();
+            let stats_b = non_homopolymer_kmers.get(kmer_b).unwrap();
             
             // Check if counts are reasonably compatible
-            // if the counts are not within 80% of each other, skip
-            if (stats_b.observed_count as f64) < (stats_a.observed_count as f64 * 0.8) ||
-               (stats_a.observed_count as f64) < (stats_b.observed_count as f64 * 0.8) {
+            if (stats_b.observed_count as f64) < (stats_a.observed_count as f64 * edge_join_threshold) ||
+               (stats_a.observed_count as f64) < (stats_b.observed_count as f64 * edge_join_threshold) {
                 #[cfg(test)]
                 println!("  Skipping {} -> {} (count mismatch: {} vs {})", 
                          String::from_utf8_lossy(kmer_a), String::from_utf8_lossy(kmer_b),
                          stats_a.observed_count, stats_b.observed_count);
                 continue;
             }
-
-            // overlapping part could not be homopolymer
-            if is_homopolymer(&kmer_a[1..]) {
-                #[cfg(test)]
-                println!("  Skipping {} -> {} (overlap is homopolymer)", 
-                         String::from_utf8_lossy(kmer_a), String::from_utf8_lossy(kmer_b));
-                continue;
-            }
             
             if kmer_a[1..] == kmer_b[..k-1] {
                 // Found a sliding overlap (length k-1)
-                #[cfg(test)]
-                println!("  Found edge: {} -> {}", 
-                         String::from_utf8_lossy(kmer_a), String::from_utf8_lossy(kmer_b));
+                // debug: if 'CTACACG' in k_mers, print edges
+                if String::from_utf8_lossy(kmer_a).contains("CTACACG") ||
+                   String::from_utf8_lossy(kmer_b).contains("CTACACG") {
+                    println!("  Overlap edge: {} -> {}", 
+                             String::from_utf8_lossy(kmer_a), String::from_utf8_lossy(kmer_b));
+                }
+                // println!("  Found edge: {} -> {}", 
+                //          String::from_utf8_lossy(kmer_a), String::from_utf8_lossy(kmer_b));
                 graph.entry(kmer_a.clone()).or_default().push(kmer_b.clone());
                 reverse_graph.entry(kmer_b.clone()).or_default().push(kmer_a.clone());
                 // Continue to find all possible edges (don't break early)
@@ -639,23 +658,63 @@ fn assemble_kmers(
     }
 
     // Find start nodes (nodes with no incoming edges or weak incoming edges)
-    let start_nodes: Vec<_> = enriched_kmers.keys()
+    let start_nodes: Vec<_> = non_homopolymer_kmers.keys()
         .filter(|kmer| !reverse_graph.contains_key(*kmer))
         .collect();
     
-    #[cfg(test)]
-    println!("Found {} start nodes", start_nodes.len());
     
     // If no clear start nodes, pick nodes with highest counts as potential starts
-    if start_nodes.is_empty() {
-        println!("  No clear start nodes found for assembly, skipping assembly.");
-        return HashMap::new();
-    }
-
+    // Also, even if we have start nodes, we might have disconnected components (cycles) 
+    // that don't have start nodes. We should process them too.
+    
     let mut assembled_sequences = HashMap::new();
     let mut processed = std::collections::HashSet::new();
+    
+    // Queue of potential start nodes. 
+    // We start with the "true" start nodes (no incoming edges).
+    // Then we will add unvisited nodes sorted by count.
+    let mut start_node_queue = start_nodes;
+    
+    // Sort true start nodes by count (descending) to prioritize high abundance paths
+    start_node_queue.sort_by(|a, b| {
+        let count_a = non_homopolymer_kmers.get(*a).unwrap().observed_count;
+        let count_b = non_homopolymer_kmers.get(*b).unwrap().observed_count;
+        count_b.cmp(&count_a)
+    });
 
-    for start_node in start_nodes {
+    loop {
+        // If queue is empty, look for any unvisited nodes to break cycles
+        if start_node_queue.is_empty() {
+            let mut remaining: Vec<_> = non_homopolymer_kmers.keys()
+                .filter(|k| !processed.contains(*k))
+                .collect();
+            
+            if remaining.is_empty() {
+                break;
+            }
+            
+            // Sort by count to pick the "best" place to break a cycle
+            remaining.sort_by(|a, b| {
+                let count_a = non_homopolymer_kmers.get(*a).unwrap().observed_count;
+                let count_b = non_homopolymer_kmers.get(*b).unwrap().observed_count;
+                count_b.cmp(&count_a)
+            });
+            
+            // Take the top one as a new start node
+            // We only take one at a time to see where it leads
+            start_node_queue.push(remaining[0]);
+        }
+
+        let start_node = start_node_queue.remove(0);
+
+        // debug: if 'CTACACG' in start_node, print info
+        let mut debug = false;
+        if String::from_utf8_lossy(start_node).contains("CTACACG") {
+            println!("Starting assembly from node: {}", 
+                     String::from_utf8_lossy(start_node));
+            debug = true;
+        }
+
         if processed.contains(start_node) {
             continue;
         }
@@ -670,7 +729,8 @@ fn assemble_kmers(
         while let Some(neighbors) = graph.get(&current_node) {
             // Only assemble non-diverging paths
             if neighbors.len() != 1 {
-                #[cfg(test)]
+                // #[cfg(test)]
+                if debug
                 {
                     println!("  Divergence at {}: {} outgoing edges", 
                              String::from_utf8_lossy(&current_node), neighbors.len());
@@ -685,6 +745,9 @@ fn assemble_kmers(
             
             // Cycle detection: if we've seen this node in the current path, stop
             if visited_in_path.contains(next_node) {
+                if debug {
+                    println!("  Cycle detected at {}", String::from_utf8_lossy(next_node));
+                }
                 break;
             }
             
@@ -702,7 +765,7 @@ fn assemble_kmers(
             
             // Collect all k-mer counts for this assembly
             let kmer_counts: Vec<u64> = path.iter()
-                .map(|kmer| enriched_kmers.get(kmer).unwrap().observed_count)
+                .map(|kmer| non_homopolymer_kmers.get(kmer).unwrap().observed_count)
                 .collect();
             
             for i in 1..path.len() {
@@ -850,6 +913,13 @@ fn write_report(
 
     // Handle assembled sequences
     for merge_result in assembled_results.values() {
+        // Filter out assembled sequences that are themselves homopolymers
+        // This prevents long Poly-A tails from cluttering the output, 
+        // while still allowing them to suppress their constituent k-mers
+        if is_homopolymer(&merge_result.sequence) {
+            continue;
+        }
+
         let enriched = merge_result.to_enriched_sequence(
             read_count,
             SequenceSource::Assembled { from_k: k_max }
@@ -871,6 +941,7 @@ fn write_report(
         kmer_results.retain(|enriched| {
             let kmer = enriched.sequence.as_bytes();
             !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
+            && !is_homopolymer(kmer)
         });
         
         all_results.extend(kmer_results);
@@ -891,6 +962,7 @@ fn write_report(
             kmer_results.retain(|enriched| {
                 let kmer = enriched.sequence.as_bytes();
                 !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
+                && !is_homopolymer(kmer)
             });
             
             all_results.extend(kmer_results);
@@ -983,7 +1055,7 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     if config.assemble {
         println!("Assembly ...");
         if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
-            assembled_sequences = assemble_kmers(enriched_k_max, k_max);
+            assembled_sequences = assemble_kmers(enriched_k_max, k_max, config.substring_count_ratio_threshold);
         }
     }
 
@@ -1068,7 +1140,7 @@ mod tests {
         kmers.insert(to_bytes("TCGATC"), KmerStats::new(to_bytes("TCGATC"), 95, 50.0));
         kmers.insert(to_bytes("CGATCG"), KmerStats::new(to_bytes("CGATCG"), 90, 50.0));
         
-        let assembled = assemble_kmers(&kmers, k);
+        let assembled = assemble_kmers(&kmers, k, 0.8);
         
         // Debug output
         println!("Assembled sequences: {} results", assembled.len());
@@ -1095,7 +1167,7 @@ mod tests {
         kmers.insert(to_bytes("CGATCA"), KmerStats::new(to_bytes("CGATCA"), 90, 50.0));
         kmers.insert(to_bytes("CGATCG"), KmerStats::new(to_bytes("CGATCG"), 88, 50.0));
         
-        let assembled = assemble_kmers(&kmers, k);
+        let assembled = assemble_kmers(&kmers, k, 0.8);
         
         // Should assemble ATCGAT -> TCGATC, stopping at the branch and recording this path
         assert_eq!(assembled.len(), 1, "Expected 1 assembled sequence up to branch point");
@@ -1118,7 +1190,7 @@ mod tests {
         kmers.insert(to_bytes("ATCGAT"), KmerStats::new(to_bytes("ATCGAT"), 100, 50.0));
         kmers.insert(to_bytes("TCGATC"), KmerStats::new(to_bytes("TCGATC"), 50, 50.0)); // 50 < 100 * 0.8
         
-        let assembled = assemble_kmers(&kmers, k);
+        let assembled = assemble_kmers(&kmers, k, 0.8);
         
         // Should not assemble due to count mismatch
         assert_eq!(assembled.len(), 0);
@@ -1143,7 +1215,7 @@ mod tests {
         kmers.insert(to_bytes("CGATCA"), KmerStats::new(to_bytes("CGATCA"), 90, 50.0));
         kmers.insert(to_bytes("CGATCG"), KmerStats::new(to_bytes("CGATCG"), 88, 50.0));
         
-        let assembled = assemble_kmers(&kmers, k);
+        let assembled = assemble_kmers(&kmers, k, 0.8);
         
         println!("Assembled sequences: {}", assembled.len());
         for (seq, count) in &assembled {
