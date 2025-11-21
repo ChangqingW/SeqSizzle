@@ -1038,23 +1038,25 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
 
     // K-mer counting and top-N selection
     println!("K-mer counting and selection...");
-    let mut enriched_kmers = HashMap::new();
-    for &k in &k_values {
-        println!("Processing {k}-mers...");
-        let kmer_stats = if let Some(min_count) = config.min_count {
-            count_kmers_with_min_count(
-                &records, k,
-                (min_count * read_count as f64).ceil() as u64,
-                total_length
-            )
-        } else {
-            count_kmers_with_zscore_stats(&records, k, total_length, config.z_score_threshold)
-        };
-        println!("Found {} {k}-mers above threshold", kmer_stats.len());
-        
-        let selected_kmers = select_top_kmers(kmer_stats, k, config.top_kmers);
-        enriched_kmers.insert(k, selected_kmers);
-    }
+    let enriched_kmers: HashMap<_, _> = k_values
+        .par_iter()
+        .map(|&k| {
+            println!("Processing {k}-mers...");
+            let kmer_stats = if let Some(min_count) = config.min_count {
+                count_kmers_with_min_count(
+                    &records, k,
+                    (min_count * read_count as f64).ceil() as u64,
+                    total_length
+                )
+            } else {
+                count_kmers_with_zscore_stats(&records, k, total_length, config.z_score_threshold)
+            };
+            println!("Found {} {k}-mers above threshold", kmer_stats.len());
+            
+            let selected_kmers = select_top_kmers(kmer_stats, k, config.top_kmers);
+            (k, selected_kmers)
+        })
+        .collect();
 
     // Cross-k substring filtering
     println!("Substring filtering...");
