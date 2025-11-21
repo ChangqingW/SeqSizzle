@@ -8,7 +8,6 @@ pub mod tui;
 pub mod match_summarizing;
 pub mod kmer;
 mod ui;
-mod reproduction_test;
 
 use crate::control::{handle_input, SearchPatternEdit, Update};
 use crate::kmer::KmerEnrichmentArgs;

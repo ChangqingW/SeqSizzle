@@ -4,3 +4,4 @@ test_data/
 perf.data
 perf.data.old
 flamegraph.svg
+.cargo/
