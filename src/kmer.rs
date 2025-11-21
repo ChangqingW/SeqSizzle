@@ -373,6 +373,15 @@ pub(crate) fn is_homopolymer(kmer: &[u8]) -> bool {
     *max_count >= threshold
 }
 
+/// Check if a k-mer is a pure homopolymer (100% same base)
+fn is_pure_homopolymer(kmer: &[u8]) -> bool {
+    if kmer.is_empty() {
+        return false;
+    }
+    let first = kmer[0];
+    kmer.iter().all(|&b| b == first)
+}
+
 // K-mer processing
 // 
 fn count_kmers_with_min_count(
@@ -780,6 +789,25 @@ pub(crate) fn assemble_kmers(
         }
     }
     
+    // Filter out sequences that are substrings of other assembled sequences
+    // This handles cases where we started assembly from the middle of a sequence (suffix)
+    // as well as the full sequence
+    let keys: Vec<Vec<u8>> = assembled_sequences.keys().cloned().collect();
+    let mut to_remove = std::collections::HashSet::new();
+    
+    for seq_a in &keys {
+        for seq_b in &keys {
+            if seq_a.len() < seq_b.len() && is_substring(seq_a, seq_b) {
+                to_remove.insert(seq_a.clone());
+                break;
+            }
+        }
+    }
+    
+    for seq in to_remove {
+        assembled_sequences.remove(&seq);
+    }
+
     if !assembled_sequences.is_empty() {
         let lengths: Vec<usize> = assembled_sequences.keys().map(|s| s.len()).collect();
         let avg_length = lengths.iter().sum::<usize>() as f64 / lengths.len() as f64;
@@ -913,10 +941,9 @@ fn write_report(
 
     // Handle assembled sequences
     for merge_result in assembled_results.values() {
-        // Filter out assembled sequences that are themselves homopolymers
-        // This prevents long Poly-A tails from cluttering the output, 
-        // while still allowing them to suppress their constituent k-mers
-        if is_homopolymer(&merge_result.sequence) {
+        // Filter out assembled sequences that are dirty homopolymers
+        // Keep pure homopolymers (e.g. AAAAAA) but remove mixed ones (e.g. AAAAAAAG)
+        if is_homopolymer(&merge_result.sequence) && !is_pure_homopolymer(&merge_result.sequence) {
             continue;
         }
 
@@ -941,7 +968,7 @@ fn write_report(
         kmer_results.retain(|enriched| {
             let kmer = enriched.sequence.as_bytes();
             !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
-            && !is_homopolymer(kmer)
+            && (!is_homopolymer(kmer) || is_pure_homopolymer(kmer))
         });
         
         all_results.extend(kmer_results);
@@ -962,7 +989,7 @@ fn write_report(
             kmer_results.retain(|enriched| {
                 let kmer = enriched.sequence.as_bytes();
                 !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
-                && !is_homopolymer(kmer)
+                && (!is_homopolymer(kmer) || is_pure_homopolymer(kmer))
             });
             
             all_results.extend(kmer_results);
