@@ -132,7 +132,7 @@ pub struct MergeResult {
     pub total_count: u64,
     pub forward_count: Option<u64>,  // Some if merged, None if single
     pub reverse_count: Option<u64>,  // Some if merged, None if single
-    pub stats: KmerStats,            // Statistical information (always present)
+    pub stats: KmerStats,            // Statistical information
 }
 
 impl MergeResult {
@@ -974,7 +974,7 @@ fn write_report(
             kmer_results.retain(|enriched| {
                 let kmer = enriched.sequence.as_bytes();
                 !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
-                && (!is_homopolymer(kmer) || is_pure_homopolymer(kmer))
+                && !is_homopolymer(kmer)
             });
             
             all_results.extend(kmer_results);
@@ -986,7 +986,7 @@ fn write_report(
         b.sqrt_deviance.partial_cmp(&a.sqrt_deviance).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // TODO: print top 10 unique and non-overlapping sequences to console
+    // TODO: Filter enriched results for unique and non-overlapping sequences ?
 
     let mut writer = csv::Writer::from_path(output_path)?;
     writer.write_record([
