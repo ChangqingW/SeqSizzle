@@ -13,6 +13,7 @@ pub enum Update {
     EditSearchPattern(SearchPatternEdit),
     CycleSearchPattern(bool),
     ToggleUIMode,
+    ToggleCopyMode,
     ScrollViewer(isize),
     WindowResize(Size),
     ToggleQualityItalic,
@@ -75,6 +76,11 @@ pub fn handle_input_viewer(_app: &App, tui: &Tui, keyevent: KeyEvent) -> Update 
             modifiers: KeyModifiers::NONE,
             ..
         } => Update::Quit,
+        KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => Update::ToggleCopyMode,
         KeyEvent {
             code: KeyCode::Char('j') | KeyCode::Down,
             modifiers: KeyModifiers::NONE,

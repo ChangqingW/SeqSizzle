@@ -9,15 +9,22 @@ use ratatui::{
 };
 
 pub fn render(app: &mut App, frame: &mut Frame) {
+
+    let viewer_borders = if app.copy {
+        Borders::TOP | Borders::BOTTOM
+    } else {
+        Borders::ALL
+    };
+
     let viewer_block = match app.get_message() {
         Some(msg) => Block::default()
-            .borders(Borders::ALL)
+            .borders(viewer_borders)
             .title(app.file.to_str().unwrap_or("SeqSizzle"))
             .title_bottom(
                 Line::from(Span::styled(msg, Style::default().fg(Color::Red)))
             ),
         None => Block::default()
-            .borders(Borders::ALL)
+            .borders(viewer_borders)
             .title(app.file.to_str().unwrap_or("SeqSizzle")),
     };
 

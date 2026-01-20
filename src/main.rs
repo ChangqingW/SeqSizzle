@@ -19,6 +19,7 @@ use ratatui::prelude::{Color, CrosstermBackend, Terminal};
 use shadow_rs::shadow;
 use std::path::PathBuf;
 use tui::Tui;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 
 shadow!(build);
 
@@ -252,6 +253,17 @@ fn main() -> Result<()> {
         match updates {
             Update::None => continue, // no need to re-draw
             Update::ToggleUIMode => app.toggle_ui_mode(),
+            Update::ToggleCopyMode => {
+                if app.copy {
+                    app.copy = false;
+                    crossterm::execute!(std::io::stderr(), EnableMouseCapture)?;
+                    app.set_message(String::from("Copy mode OFF"));
+                } else {
+                    app.copy = true;
+                    crossterm::execute!(std::io::stderr(), DisableMouseCapture)?;
+                    app.set_message(String::from("Copy mode ON"));
+                }
+            }
             Update::WindowResize(rect) => {
                 app.resized_update(rect);
             }

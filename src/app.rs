@@ -63,6 +63,7 @@ impl StylingConfig {
 #[derive(Debug)]
 pub struct App<'a> {
     pub mode: UIMode,
+    pub copy: bool, // copy mode, disables mouse listening and side borders
     pub quit: bool,
     pub search_panel: SearchPanel<'a>,
     pub search_patterns: Vec<SearchPattern>,
@@ -131,6 +132,7 @@ impl App<'_> {
             search_patterns: search_patterns.clone(),
             message: TransientMessage::default(),
             mode: UIMode::Viewer,
+            copy: true,
             search_panel: SearchPanel::new(&search_patterns),
             file: Path::new(&file).to_path_buf(),
             reader,
@@ -219,22 +221,30 @@ impl App<'_> {
         // rendered_lines append / pop lines if scrolling beyond a read
 
         // line height in tui
-        fn line_height(line: &Line, tui_size: Size) -> usize {
-            line.width().div_ceil(tui_size.width as usize - 2) // 2 boarders 1 char wide
+        fn line_height(line: &Line, tui_size: Size, has_side_borders: bool) -> usize {
+            let usable_width = if has_side_borders {
+                tui_size.width as usize - 2 // 2 borders 1 char wide
+            } else {
+                tui_size.width as usize
+            };
+            line.width().div_ceil(usable_width.max(1))
         }
-        fn lines_height_vec(lines: &[Line], tui_size: Size) -> usize {
-            lines.iter().map(|x| line_height(x, tui_size)).sum()
+        fn lines_height_vec(lines: &[Line], tui_size: Size, has_side_borders: bool) -> usize {
+            lines.iter().map(|x| line_height(x, tui_size, has_side_borders)).sum()
         }
         fn lines_height_vecdeque(
             lines: &VecDeque<Line>,
             indexes: &[usize],
             tui_size: Size,
+            has_side_borders: bool,
         ) -> usize {
             indexes
                 .iter()
-                .map(|x| line_height(&lines[*x], tui_size))
+                .map(|x| line_height(&lines[*x], tui_size, has_side_borders))
                 .sum()
         }
+
+        let has_side_borders = !self.copy;
 
         if num == 0 {
             return;
@@ -259,7 +269,7 @@ impl App<'_> {
                         &self.search_patterns,
                         &self.styling_config,
                     );
-                    remaining += lines_height_vec(&lines[0..2], tui_size) as isize;
+                    remaining += lines_height_vec(&lines[0..2], tui_size, has_side_borders) as isize;
                     lines
                         .into_iter()
                         .rev()
@@ -279,7 +289,7 @@ impl App<'_> {
         } else if num > 0 {
             let mut remaining: isize = num + self.scroll_status.1 as isize; // remaining lines to scroll
             let mut current_line_height =
-                lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_size);
+                lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_size, has_side_borders);
             self.scroll_status.1 = 0;
 
             while remaining >= current_line_height as isize {
@@ -292,7 +302,7 @@ impl App<'_> {
                     let max_scroll = 3 + self
                         .rendered_lines // 2 x boarders 1 char high, plus 1 empty line to indicate EOF
                         .iter()
-                        .map(|x| line_height(x, tui_size))
+                        .map(|x| line_height(x, tui_size, has_side_borders))
                         .sum::<usize>()
                         .saturating_sub(tui_size.height as usize);
                     self.scroll_status.1 =
@@ -315,7 +325,7 @@ impl App<'_> {
                     .for_each(|x| self.rendered_lines.push_back(x));
                 remaining -= current_line_height as isize;
                 current_line_height =
-                    lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_size);
+                    lines_height_vecdeque(&self.rendered_lines, &[0, 1], tui_size, has_side_borders);
             }
             self.scroll_status.1 = remaining as usize;
             return;
