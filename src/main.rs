@@ -38,15 +38,15 @@ struct Args {
 
     /// Start with 10x 3' kit adaptors:
     ///  - Patrial Read1: CTACACGACGCTCTTCCGATCT (and reverse complement)
-    ///  - Partial TSO: AGATCGGAAGAGCGTCGTGTAG (and reverse complement)
+    ///  - Partial TSO: CCCATGTACTCTGCGTTGATACCA (and reverse complement)
     ///  - Poly(>10)A/T
     #[clap(long, verbatim_doc_comment)] // https://github.com/clap-rs/clap/issues/2389
     adapter_3p: bool,
 
     /// Start with 10x 5' kit adaptors
     ///  - Patrial Read1: CTACACGACGCTCTTCCGATCT (and reverse complement)
-    ///  - TSO: TTTCTTATATGGG (and reverse complement)
     ///  - Patrial Read2: AGATCGGAAGAGCACACGTCTGAA (and reverse complement)
+    ///  - TSO: TTTCTTATATGGG (and reverse complement)
     ///  - Poly(>10)A/T
     #[clap(long, verbatim_doc_comment)]
     adapter_5p: bool,
@@ -149,9 +149,9 @@ fn main() -> Result<()> {
     if args.adapter_3p {
         patterns.extend_from_slice(&[
             SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3, "R1"),
-            SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3, "TSO"),
-            SearchPattern::new("TGGTATCAACGCAGAGTACATGGG".to_string(), Color::Red, 3, "R1 rev"),
-            SearchPattern::new("CCCATGTACTCTGCGTTGATACCA".to_string(), Color::Yellow, 3, "TSO rev"),
+            SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Green, 3, "R1 rev"),
+            SearchPattern::new("CCCATGTACTCTGCGTTGATACCA".to_string(), Color::Yellow, 3, "TSO"),
+            SearchPattern::new("TGGTATCAACGCAGAGTACATGGG".to_string(), Color::Red, 3, "TSO rev"),
             SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 1, ""),
             SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 1, ""),
         ]);
@@ -159,11 +159,11 @@ fn main() -> Result<()> {
     if args.adapter_5p {
         patterns.extend_from_slice(&[
             SearchPattern::new("CTACACGACGCTCTTCCGATCT".to_string(), Color::Blue, 3, "R1"),
-            SearchPattern::new("TTTCTTATATGGG".to_string(), Color::Green, 2, "TSO"),
-            SearchPattern::new("TGGTATCAACGCAGAGTACATGGG".to_string(), Color::Red, 3, "R1 rev"),
-            SearchPattern::new("CCCATATAAGAAA".to_string(), Color::Yellow, 2, "TSO rev"),
+            SearchPattern::new("AGATCGGAAGAGCGTCGTGTAG".to_string(), Color::Red, 3, "R1 rev"),
             SearchPattern::new("AGATCGGAAGAGCACACGTCTGAA".to_string(), Color::Cyan, 3, "R2"),
             SearchPattern::new("TTCAGACGTGTGCTCTTCCGATCT".to_string(), Color::Magenta, 3, "R2 rev"),
+            SearchPattern::new("TTTCTTATATGGG".to_string(), Color::Green, 2, "TSO"),
+            SearchPattern::new("CCCATATAAGAAA".to_string(), Color::Yellow, 2, "TSO rev"),
             SearchPattern::new("TTTTTTTTTTTT".to_string(), Color::Gray, 1, ""),
             SearchPattern::new("AAAAAAAAAAAA".to_string(), Color::Gray, 1, ""),
         ]);

@@ -35,7 +35,7 @@ cargo install --path .
 Cargo will build the `seqsizzle` binary and place it in `$HOME/.cargo`.
 
 # Usage
-`./seqsizzle -h`:
+`seqsizzle -h`:
 ```
 A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.
 
@@ -53,13 +53,13 @@ Options:
       --adapter-3p
           Start with 10x 3' kit adaptors:
            - Patrial Read1: CTACACGACGCTCTTCCGATCT (and reverse complement)
-           - Partial TSO: AGATCGGAAGAGCGTCGTGTAG (and reverse complement)
+           - Partial TSO: CCCATGTACTCTGCGTTGATACCA (and reverse complement)
            - Poly(>10)A/T
       --adapter-5p
           Start with 10x 5' kit adaptors
            - Patrial Read1: CTACACGACGCTCTTCCGATCT (and reverse complement)
-           - TSO: TTTCTTATATGGG (and reverse complement)
            - Patrial Read2: AGATCGGAAGAGCACACGTCTGAA (and reverse complement)
+           - TSO: TTTCTTATATGGG (and reverse complement)
            - Poly(>10)A/T
   -p, --patterns <PATTERNS_PATH>
           Start with patterns from a CSV file
@@ -98,6 +98,83 @@ When on the patterns list field, up / down arrows cycle through patterns, `Backs
 `Return` to add current inputs into the search pattern list (when focusing on any of the input boxes, rather than the patterns list).  
 Use **Shift +** arrow keys to move cursor within an input field (as arrow keys alone are bind to cycling input fields).  
 `/` or `Esc` to close the search panel.
+
+## Subcommands
+### enrich
+`seqsizzle enrich --help`:
+```
+Find enriched k-mers in the reads. This can be used to identify potential adapter/primer sequences
+
+Usage: seqsizzle <FILE> enrich [OPTIONS] --output <OUTPUT>
+
+Options:
+  -o, --output <OUTPUT>
+          Path to write the output CSV file
+      --max-reads <MAX_READS>
+          Limit the total number of reads used for enrichment. Set to 0 to use all reads [default: 10000]
+      --sample
+          If set, randomly sample `--max-reads` reads from the file instead of taking the first N. Requires `--max-reads`
+      --k-min <K_MIN>
+          Minimum k-mer length to check [default: 8]
+      --k-max <K_MAX>
+          Maximum k-mer length to check [default: 12]
+      --k-step <K_STEP>
+          Step size between k-values (arithmetic progression) [default: 2]
+      --top-kmers <TOP_KMERS>
+          Number of top k-mers to keep per k value [default: 400]
+      --substring-count-ratio-threshold <SUBSTRING_COUNT_RATIO_THRESHOLD>
+          Substring filtering counts ratio threshold. For k-mers that are contained within longer k-mers, those with (shorter k-mer count) / (longer k-mer count) >= this threshold will be removed. For homopolymer k-mers, the threshold is lowered to threshold^4 [default: 0.8]
+      --min-count <MIN_COUNT>
+          Minimum counts per read threshold for k-mers (overrides z-score if provided). Accepts fractional values (e.g., 0.01 for 1 count per 100 reads)
+      --z-score-threshold <Z_SCORE_THRESHOLD>
+          Z-score threshold for k-mer enrichment (default: 5.0) [default: 5]
+      --skip-assemble
+          Perform assembly with k_max k-mers
+      --detect-reverse-complement
+          Detect and merge reverse complement k-mers
+  -h, --help
+          Print help
+```
+Example output CSV file:
+`seqsizzle test.fastq enrich -o enrichment.csv`
+```
+sequence,length,estimated_count,counts_per_read,source_k,sqrt_deviance,log_fold_enrichment
+TTTTTTTTTTTT,12,179912,17.99,12,2041.4,18.2
+AAAAAAAAAAAA,12,94008,9.40,12,1433.7,17.2
+CCCATGTACTCTGCGTTGATACCACTGCTT,30,6190,0.62,assembled from k=12,640.8,49.3
+CTACACGACGCTCTTCCGATCT,22,6440,0.64,assembled from k=12,533.7,33.3
+AAGCAGTGGTATCAACGCAGAGTACATGGG,30,3298,0.33,assembled from k=12,463.3,48.4
+AGATCGGAAGAGCGTCGTGTAG,22,3441,0.34,assembled from k=12,384.5,32.4
+...
+```
+
+### summarize
+`seqsizzle summarize --help`:
+```
+Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped, print the number of reads that match each pattern combination in TSV format. To be moved to the UI in the future
+
+Usage: seqsizzle <FILE> summarize [OPTIONS]
+
+Options:
+      --counts  Print the counts of each summarized catagory instead of the percentage
+  -h, --help    Print help
+```
+Example output:
+`seqsizzle test.fastq --adapter-3p summarize > summarize.txt`
+```
+tail summarize.txt
+1%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AAAAAAAAAAAA..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
+1%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..TTTTTTTTTTTT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
+1%	..TGGTATCAACGCAGAGTACATGGG..AGATCGGAAGAGCGTCGTGTAG
+1%	CTACACGACGCTCTTCCGATCT..CCCATGTACTCTGCGTTGATACCA..
+3%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..AAAAAAAAAAAA..CCCATGTACTCTGCGTTGATACCA..
+3%	..TGGTATCAACGCAGAGTACATGGG..TTTTTTTTTTTT..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
+6%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
+6%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
+34%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
+36%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
+```
+The output indicates 36% of reads contains the R1 adaptor, followed by a polyT stretch and the TSO sequence. The line above (files sorted by percentage) indicates that 34% of reads are the reverse complement of that. The `..` indicates an insertion of unmatched sequence.
 
 # Roadmap
 ## functionality 

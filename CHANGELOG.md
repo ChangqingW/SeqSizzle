@@ -2,6 +2,15 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.4.0]
+ * Refined `enrich` subcommand
+    * added `--max-reads` and `--sampling` options to limit the number of reads processed
+    * refined homopolyer filtering and kmer assembly
+    * Assembly is now optional with `--skip-assemble` flag
+    * added `counts_per_read` output column
+ * Defaults to start in a copy mode (new, allows mouse selection and copying text from terminal, no side borders)
+ * Fixed typos in adapter presets
+
 ## [0.3.0]
  * added kmer enrichment analysis (`enrich` subcommand)
 
