@@ -1,6 +1,6 @@
 [package]
 name = "seqsizzle" #https://github.com/rust-lang/cargo/issues/9778
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Changqing Wang <wang.ch@wehi.edu.au>"]
 description = "A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently."
 readme = "README.md"
@@ -27,6 +27,7 @@ rayon = ">= 1.11.0"
 tui-textarea = ">= 0.7.0"
 shadow-rs = ">= 1.5.0"
 csv = ">= 1.4.0"
+rand = "0.8"
 
 [dependencies.uuid]
 version = ">= 1.6.1"

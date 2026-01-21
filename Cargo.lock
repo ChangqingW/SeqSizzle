@@ -1550,7 +1550,7 @@ checksum = "d4f410fedcf71af0345d7607d246e7ad15faaadd49d240ee3b24e5dc21a820ac"
 
 [[package]]
 name = "seqsizzle"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bio",
@@ -1561,6 +1561,7 @@ dependencies = [
  "gcollections",
  "intervallum",
  "num-traits",
+ "rand 0.8.5",
  "ratatui",
  "rayon",
  "shadow-rs",

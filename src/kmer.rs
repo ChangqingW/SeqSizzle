@@ -2,6 +2,8 @@ use crate::io::{SequenceReader, SequenceRecord};
 use anyhow::Result;
 use clap::Args;
 use rayon::prelude::*;
+use rand::Rng;
+use rand::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::ops::Range;
@@ -112,7 +114,7 @@ impl EnrichedSequence {
             format!("{:.1}", self.log_fold_enrichment)
         };
         
-        writer.write_record(&[
+        writer.write_record([
             &self.sequence,
             &self.length.to_string(),
             &self.count_display,
@@ -188,12 +190,22 @@ pub struct KmerEnrichmentArgs {
     #[clap(short, long)]
     pub output: PathBuf,
 
+    /// Limit the total number of reads used for enrichment.
+    /// Set to 0 to use all reads.
+    #[clap(long, default_value_t = 10000)]
+    pub max_reads: usize,
+
+    /// If set, randomly sample `--max-reads` reads from the file instead of taking the first N.
+    /// Requires `--max-reads`.
+    #[clap(long)]
+    pub sample: bool,
+
     /// Minimum k-mer length to check.
-    #[clap(long, default_value_t = 16)]
+    #[clap(long, default_value_t = 8)]
     pub k_min: usize,
 
     /// Maximum k-mer length to check.
-    #[clap(long, default_value_t = 30)]
+    #[clap(long, default_value_t = 12)]
     pub k_max: usize,
 
     /// Step size between k-values (arithmetic progression).
@@ -287,6 +299,10 @@ impl KmerConfig {
 
 /// Validate CLI arguments and return errors for invalid combinations
 fn validate_args(args: &KmerEnrichmentArgs) -> Result<()> {
+    if args.sample && args.max_reads == 0 {
+        return Err(anyhow::anyhow!("--sample requires --max-reads to be set greater than 0"));
+    }
+    
     if args.k_min > args.k_max {
         return Err(anyhow::anyhow!(
             "k-min ({}) must be less than or equal to k-max ({})",
@@ -530,7 +546,7 @@ fn filter_substrings(
     // Get all k-values that are actually present (in case of step > 1)
     let mut k_values: Vec<usize> = enriched_kmers.keys().copied().collect();
     k_values.sort();
-    let k_max = k_values.last().unwrap().clone();
+    let k_max = *k_values.last().unwrap();
     
     // Process in increasing k order: k_min to k_max-1
     // This ensures shorter k-mers are filtered out by longer ones iteratively
@@ -615,7 +631,7 @@ fn assemble_kmers(
     
     let filtered_count = enriched_kmers.len() - non_homopolymer_kmers.len();
     if filtered_count > 0 {
-        println!("  Filtered out {} homopolymer k-mers from assembly", filtered_count);
+        println!("  Filtered out {filtered_count} homopolymer k-mers from assembly");
     }
 
     // Build overlap graph with stricter overlap criteria
@@ -762,8 +778,7 @@ fn assemble_kmers(
                 .map(|kmer| non_homopolymer_kmers.get(kmer).unwrap().observed_count)
                 .collect();
             
-            for i in 1..path.len() {
-                let curr_kmer = &path[i];
+            for curr_kmer in &path[1..] {
                 // Append the non-overlapping part of current k-mer
                 assembled_seq.push(curr_kmer[k-1]);
             }
@@ -882,9 +897,7 @@ fn merge_kmers_with_rc(
     let merged_results = merge_sequences_with_rc(kmer_counts, rc_merging_applied, total_length);
     
     // Convert MergeResults to EnrichedSequences
-    merged_results
-        .into_iter()
-        .map(|(_, result)| result.to_enriched_sequence(read_count, source.clone()))
+    merged_results.into_values().map(|result| result.to_enriched_sequence(read_count, source.clone()))
         .collect()
 }
 
@@ -912,20 +925,23 @@ fn is_substring_of_assembled_sequences(
     false
 }
 
-fn write_report(
-    output_path: &Path,
-    enriched_kmers: &HashMap<usize, HashMap<Vec<u8>, KmerStats>>,
-    assembled_results: &HashMap<Vec<u8>, MergeResult>,
+/// Arguments for `write_report`.
+struct WriteReportArgs<'a> {
+    output_path: &'a Path,
+    enriched_kmers: &'a HashMap<usize, HashMap<Vec<u8>, KmerStats>>,
+    assembled_results: &'a HashMap<Vec<u8>, MergeResult>,
     k_min: usize,
     k_max: usize,
     rc_merging_applied: bool,
     total_length: usize,
     read_count: usize,
-) -> Result<()> {
+}
+
+fn write_report(args: WriteReportArgs<'_>) -> Result<()> {
     let mut all_results: Vec<EnrichedSequence> = Vec::new();
 
     // Handle assembled sequences
-    for merge_result in assembled_results.values() {
+    for merge_result in args.assembled_results.values() {
         // Filter out assembled sequences that are dirty homopolymers
         // Keep pure homopolymers (e.g. AAAAAA) but remove mixed ones (e.g. AAAAAAAG)
         if is_homopolymer(&merge_result.sequence) && !is_pure_homopolymer(&merge_result.sequence) {
@@ -933,76 +949,78 @@ fn write_report(
         }
 
         let enriched = merge_result.to_enriched_sequence(
-            read_count,
-            SequenceSource::Assembled { from_k: k_max }
+            args.read_count,
+            SequenceSource::Assembled { from_k: args.k_max },
         );
         all_results.push(enriched);
     }
 
     // Handle k-mers from k_max, with RC merging if applicable
-    if let Some(enriched_k_max) = enriched_kmers.get(&k_max) {
+    if let Some(enriched_k_max) = args.enriched_kmers.get(&args.k_max) {
         let mut kmer_results = merge_kmers_with_rc(
             enriched_k_max,
-            rc_merging_applied,
-            read_count,
-            total_length,
-            SequenceSource::Kmer(k_max)
+            args.rc_merging_applied,
+            args.read_count,
+            args.total_length,
+            SequenceSource::Kmer(args.k_max),
         );
-        
+
         // Filter out k-mers that are substrings of assembled sequences
         kmer_results.retain(|enriched| {
             let kmer = enriched.sequence.as_bytes();
-            !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
-            && (!is_homopolymer(kmer) || is_pure_homopolymer(kmer))
+            !is_substring_of_assembled_sequences(kmer, args.assembled_results, args.rc_merging_applied)
+                && (!is_homopolymer(kmer) || is_pure_homopolymer(kmer))
         });
-        
+
         all_results.extend(kmer_results);
     }
 
     // Handle k-mers from smaller k values, with RC merging if applicable
-    for k in (k_min..k_max).rev() {
-        if let Some(enriched_k) = enriched_kmers.get(&k) {
+    for k in (args.k_min..args.k_max).rev() {
+        if let Some(enriched_k) = args.enriched_kmers.get(&k) {
             let mut kmer_results = merge_kmers_with_rc(
                 enriched_k,
-                rc_merging_applied,
-                read_count,
-                total_length,
-                SequenceSource::Kmer(k)
+                args.rc_merging_applied,
+                args.read_count,
+                args.total_length,
+                SequenceSource::Kmer(k),
             );
-            
+
             // Filter out k-mers that are substrings of assembled sequences
             kmer_results.retain(|enriched| {
                 let kmer = enriched.sequence.as_bytes();
-                !is_substring_of_assembled_sequences(kmer, assembled_results, rc_merging_applied)
-                && !is_homopolymer(kmer)
+                !is_substring_of_assembled_sequences(kmer, args.assembled_results, args.rc_merging_applied)
+                    && !is_homopolymer(kmer)
             });
-            
+
             all_results.extend(kmer_results);
         }
     }
 
     // Sort by sqrt_deviance (descending)
     all_results.sort_by(|a, b| {
-        b.sqrt_deviance.partial_cmp(&a.sqrt_deviance).unwrap_or(std::cmp::Ordering::Equal)
+        b.sqrt_deviance
+            .partial_cmp(&a.sqrt_deviance)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // TODO: Filter enriched results for unique and non-overlapping sequences ?
 
-    let mut writer = csv::Writer::from_path(output_path)?;
+    let mut writer = csv::Writer::from_path(args.output_path)?;
     writer.write_record([
-        "sequence", 
-        "length", 
-        "estimated_count", 
+        "sequence",
+        "length",
+        "estimated_count",
         "counts_per_read",
         "source_k",
-        "sqrt_deviance", 
-        "log_fold_enrichment"
+        "sqrt_deviance",
+        "log_fold_enrichment",
     ])?;
-    
+
     for enriched in all_results {
         enriched.write_to_csv(&mut writer)?;
     }
-    
+
     writer.flush()?;
     Ok(())
 }
@@ -1010,9 +1028,9 @@ fn write_report(
 pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     // Create configuration from arguments (includes validation)
     let config = KmerConfig::from_args(args)?;
-    
+
     println!("Starting k-mer enrichment analysis...");
-    
+
     // Collect k-values for processing
     let k_values = config.k_values();
     println!(
@@ -1025,16 +1043,62 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     // Load sequences
     println!("Loading sequences...");
     let mut reader = SequenceReader::from_path(file_path)?;
-    let mut records = Vec::new();
-    let mut total_length = 0;
-    let mut index = 0;
-    while let Some(record) = reader.get_index(index)? {
-        total_length += record.seq().len();
-        records.push(record);
-        index += 1;
-    }
+    let (records, total_length) = if args.sample {
+        // Reservoir sampling: uniformly sample `max_reads` reads from the entire file
+        // using one pass and O(max_reads) memory.
+        let reservoir_size = args.max_reads;
+        let mut reservoir: Vec<SequenceRecord> = Vec::with_capacity(reservoir_size);
+        let mut reservoir_total_length: usize = 0;
+
+        // Fixed seed for debugging
+        let mut rng = StdRng::seed_from_u64(2026);
+        let mut index: usize = 0;
+        while let Some(record) = reader.get_index(index)? {
+            index += 1;
+
+            if reservoir.len() < reservoir_size {
+                reservoir_total_length += record.seq().len();
+                reservoir.push(record);
+                continue;
+            }
+
+            // Choose a random integer j in [0, index)
+            // If j < reservoir_size, replace that element.
+            let j = rng.gen_range(0..index);
+            if j < reservoir_size {
+                // Update total length accounting
+                reservoir_total_length = reservoir_total_length
+                    .saturating_sub(reservoir[j].seq().len())
+                    .saturating_add(record.seq().len());
+                reservoir[j] = record;
+            }
+        }
+
+        (reservoir, reservoir_total_length)
+    } else {
+        // Take the first `max_reads` reads (or all if not set)
+        let mut records = Vec::new();
+        let mut total_length = 0;
+        let mut index = 0;
+        let mut remaining = if args.max_reads > 0 {
+            Some(args.max_reads)
+        } else {
+            None 
+        };
+        while remaining.is_none_or(|n| n > 0) {
+            let Some(record) = reader.get_index(index)? else { break };
+            total_length += record.seq().len();
+            records.push(record);
+            index += 1;
+            if let Some(n) = remaining.as_mut() {
+                *n = n.saturating_sub(1);
+            }
+        }
+        (records, total_length)
+    };
+
     let read_count = records.len();
-    println!("Loaded {} sequences with total length {} bp", read_count, total_length);
+    println!("Loaded {read_count} sequences with total length {total_length} bp");
 
     // K-mer counting and top-N selection
     println!("K-mer counting and selection...");
@@ -1052,7 +1116,7 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
                 count_kmers_with_zscore_stats(&records, k, total_length, config.z_score_threshold)
             };
             println!("Found {} {k}-mers above threshold", kmer_stats.len());
-            
+
             let selected_kmers = select_top_kmers(kmer_stats, k, config.top_kmers);
             (k, selected_kmers)
         })
@@ -1087,7 +1151,16 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
         merge_sequences_with_rc(assembled_sequences, false, total_length)
     };
 
-    write_report(&config.output_path, &enriched_kmers, &assembled_results, k_min, k_max, config.detect_reverse_complement, total_length, read_count)?;
+    write_report(WriteReportArgs {
+        output_path: &config.output_path,
+        enriched_kmers: &enriched_kmers,
+        assembled_results: &assembled_results,
+        k_min,
+        k_max,
+        rc_merging_applied: config.detect_reverse_complement,
+        total_length,
+        read_count,
+    })?;
     println!("Results written to {}", config.output_path.display());
 
     Ok(())
