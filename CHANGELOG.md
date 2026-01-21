@@ -2,6 +2,9 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.4.1]
+ * Fixed copy mode not working on startup
+
 ## [0.4.0]
  * Refined `enrich` subcommand
     * added `--max-reads` and `--sampling` options to limit the number of reads processed

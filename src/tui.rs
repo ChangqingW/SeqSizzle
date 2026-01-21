@@ -25,9 +25,13 @@ impl Tui {
         Self { terminal, events }
     }
 
-    pub fn enter(&mut self) -> Result<()> {
+    pub fn enter(&mut self, enable_mouse: bool) -> Result<()> {
         terminal::enable_raw_mode()?;
-        crossterm::execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
+        if enable_mouse {
+            crossterm::execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
+        } else {
+            crossterm::execute!(io::stderr(), EnterAlternateScreen)?;
+        }
 
         // Define a custom panic hook to reset the terminal properties.
         // This way, you won't have your terminal messed up if an unexpected error happens.

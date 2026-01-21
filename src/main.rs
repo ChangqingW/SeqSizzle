@@ -243,7 +243,7 @@ fn main() -> Result<()> {
     }
     let events = EventHandler::new(250);
     let mut tui = Tui::new(terminal, events);
-    tui.enter()?;
+    tui.enter(!app.copy)?;
     tui.draw(&mut app)?;
 
     // Start the main loop.
