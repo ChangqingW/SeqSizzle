@@ -240,6 +240,16 @@ pub struct KmerEnrichmentArgs {
     #[clap(long)]
     pub detect_reverse_complement: bool,
 
+    /// Anti-reference FASTA/FASTQ file. All k-mers present in this file (for the same k values)
+    /// are used as a blacklist and will be excluded from enrichment results.
+    #[clap(long = "anti-reference")]
+    pub anti_reference: Option<PathBuf>,
+
+    /// Anti-reference error rate (0.0-1.0). If set and `--anti-reference` is provided,
+    /// additionally blacklist all k-mers within floor(k * error_rate) substitutions of each
+    /// blacklisted k-mer.
+    #[clap(long = "anti-reference-error-rate", default_value_t = 0.0)]
+    pub anti_reference_error_rate: f64,
 }
 
 /// Configuration struct for centralized parameter management
@@ -254,6 +264,8 @@ pub struct KmerConfig {
     pub output_path: PathBuf,
     pub assemble: bool,
     pub detect_reverse_complement: bool,
+    pub anti_reference_path: Option<PathBuf>,
+    pub anti_reference_error_rate: f64,
 }
 
 impl KmerConfig {
@@ -270,7 +282,7 @@ impl KmerConfig {
         
         Ok(KmerConfig {
             k_range: args.k_min..args.k_max + 1,
-            k_step: args.k_step,
+            k_step: if args.k_max == args.k_min { 0 } else { args.k_step },
             top_kmers: args.top_kmers,
             substring_count_ratio_threshold: args.substring_count_ratio_threshold,
             z_score_threshold: args.z_score_threshold,
@@ -278,14 +290,20 @@ impl KmerConfig {
             output_path,
             assemble: !args.skip_assemble,
             detect_reverse_complement: args.detect_reverse_complement,
+            anti_reference_path: args.anti_reference.clone(),
+            anti_reference_error_rate: args.anti_reference_error_rate,
         })
     }
     
     /// Get the k-values to process as an arithmetic sequence
     pub fn k_values(&self) -> Vec<usize> {
-        (self.k_range.start..self.k_range.end)
-            .step_by(self.k_step)
-            .collect()
+        if self.k_step == 0 {
+            vec![self.k_range.start]
+        } else {
+            (self.k_range.start..self.k_range.end)
+                .step_by(self.k_step)
+                .collect()
+        }
     }
     
     /// Get filtering method description for logging
@@ -310,11 +328,11 @@ fn validate_args(args: &KmerEnrichmentArgs) -> Result<()> {
         ));
     }
     
-    if args.k_step == 0 {
+    if !(args.k_min == args.k_max) && args.k_step == 0 {
         return Err(anyhow::anyhow!("k-step must be greater than 0"));
     }
     
-    if args.k_step > (args.k_max - args.k_min) {
+    if !(args.k_min == args.k_max) && args.k_step > (args.k_max - args.k_min) {
         return Err(anyhow::anyhow!(
             "k-step ({}) is too large for the given k-range ({} to {})",
             args.k_step, args.k_min, args.k_max
@@ -348,6 +366,23 @@ fn validate_args(args: &KmerEnrichmentArgs) -> Result<()> {
         }
     }
     
+    // Validate anti-reference path if provided
+    if let Some(ref anti_ref) = args.anti_reference {
+        if !anti_ref.exists() {
+            return Err(anyhow::anyhow!(
+                "Anti-reference file does not exist: {}",
+                anti_ref.display()
+            ));
+        }
+    }
+
+    if args.anti_reference_error_rate < 0.0 || args.anti_reference_error_rate >= 1.0 {
+        return Err(anyhow::anyhow!(
+            "anti-reference-error-rate ({}) must be between 0.0 and 1.0",
+            args.anti_reference_error_rate
+        ));
+    }
+
     Ok(())
 }
 
@@ -412,7 +447,7 @@ fn count_kmers_with_min_count(
     // Calculate expected frequency for statistical calculations
     let total_possible_kmers = total_length.saturating_sub(k - 1);
     let expected_frequency = total_possible_kmers as f64 / (4_f64.powi(k as i32));
-    
+
     // Count k-mers
     let kmer_counts: HashMap<Vec<u8>, u64> = records
         .par_iter()
@@ -427,10 +462,8 @@ fn count_kmers_with_min_count(
             }
             a
         });
-    
+
     // Filter and convert to KmerStats
-    // not calculating adjusted p-values anymore
-    // let total_kmers_count = kmer_counts.len();
     kmer_counts
         .into_iter()
         .filter(|(_, count)| *count >= min_threshold)
@@ -452,13 +485,13 @@ fn count_kmers_with_zscore_stats(
     // Expected count = total_possible_kmers * P(specific k-mer)
     let total_possible_kmers = total_length.saturating_sub(k - 1);
     let expected_frequency = total_possible_kmers as f64 / (4_f64.powi(k as i32));
-    
+
     // For Binomial distribution, std = sqrt(n * p * (1 - p))
     let expected_std = (expected_frequency * (1.0 - (1.0 / 4_f64.powi(k as i32)))).sqrt();
     let min_count_threshold = (expected_frequency + z_threshold * expected_std).ceil().max(2.0) as u64;
-    
+
     println!("  Expected frequency: {expected_frequency:.2}, std: {expected_std:.2}, min_count (Z≥{z_threshold:.1}): {min_count_threshold}");
-    
+
     // Count k-mers
     let kmer_counts: HashMap<Vec<u8>, u64> = records
         .par_iter()
@@ -473,9 +506,8 @@ fn count_kmers_with_zscore_stats(
             }
             a
         });
-    
+
     // Filter and convert to KmerStats
-    // let total_kmers_count = kmer_counts.len();
     kmer_counts
         .into_iter()
         .filter(|(_, count)| *count >= min_count_threshold)
@@ -486,11 +518,90 @@ fn count_kmers_with_zscore_stats(
         .collect()
 }
 
+
+/// Load all records from an anti-reference FASTA/FASTQ file.
+fn load_anti_reference_records(anti_reference_path: &Path) -> Result<Vec<SequenceRecord>> {
+    let mut reader = SequenceReader::from_path(anti_reference_path)?;
+    let mut records = Vec::new();
+    let mut index = 0;
+    while let Some(record) = reader.get_index(index)? {
+        records.push(record);
+        index += 1;
+    }
+    Ok(records)
+}
+
+/// Returns true if `pattern` matches any substring of `text` within edit distance `dist`.
+/// Uses the same `bio::pattern_matching::myers` approach as `search_generic` in `app.rs`.
+fn matches_any_within_edit_distance(pattern: &[u8], text: &[u8], dist: usize, k: usize) -> bool {
+    use bio::pattern_matching::myers::{Myers, MyersBuilder};
+
+    if pattern.is_empty() {
+        return false;
+    }
+
+    // Exact match fast-path
+    if dist == 0 {
+        return text
+            .windows(pattern.len())
+            .any(|w| w.eq_ignore_ascii_case(pattern));
+    }
+
+    let dist: u8 = dist.try_into().expect("Edit distance too large for Myers algorithm (u8)");
+
+    let mut builder = MyersBuilder::new();
+    for (base, equivalents) in vec![
+        (b'M', &b"AC"[..]),
+        (b'R', &b"AG"[..]),
+        (b'W', &b"AT"[..]),
+        (b'S', &b"CG"[..]),
+        (b'Y', &b"CT"[..]),
+        (b'K', &b"GT"[..]),
+        (b'V', &b"ACGMRS"[..]),
+        (b'H', &b"ACTMWY"[..]),
+        (b'D', &b"AGTRWK"[..]),
+        (b'B', &b"CGTSYK"[..]),
+        (b'N', &b"ACGTMRWSYKVHDB"[..]),
+    ] {
+        builder.ambig(base, equivalents);
+    }
+
+    if k < 8 {
+        let mut myers: Myers<u8> = builder.build(pattern);
+        myers
+            .find_all(text, dist)
+            .next()
+            .is_some()
+    } else if k < 16 {
+        let mut myers: Myers<u16> = builder.build(pattern);
+        myers
+            .find_all(text, dist)
+            .next()
+            .is_some()
+    } else if k < 32 {
+        let mut myers: Myers<u32> = builder.build(pattern);
+        myers
+            .find_all(text, dist)
+            .next()
+            .is_some()
+    } else if k < 64 {
+        let mut myers: Myers<u64> = builder.build(pattern);
+        myers
+            .find_all(text, dist)
+            .next()
+            .is_some()
+    } else {
+        panic!("K-mer length too large for Myers algorithm");
+    }
+}
+
 /// Select top k-mers with balanced approach for homopolymers
 fn select_top_kmers(
     kmer_stats: HashMap<Vec<u8>, KmerStats>, 
     k: usize, 
     top_n: usize,
+    anti_reference_records: Option<&[SequenceRecord]>,
+    anti_reference_error_rate: f64,
 ) -> HashMap<Vec<u8>, KmerStats> {
     let initial_count = kmer_stats.len();
     
@@ -507,22 +618,38 @@ fn select_top_kmers(
     // TODO: simplify this with pure / nosiy homopolymer filtering?
     // Strategy: Keep some homopolymers, but focus on non-homopolymer sequences
     let max_homopolymers = (top_n / 10).clamp(4, 20); // 10% for homopolymers, 4-20 range
-    let remaining_slots = top_n.saturating_sub(max_homopolymers.min(homopolymers.len()));
+    let mut remaining_slots = top_n.saturating_sub(max_homopolymers.min(homopolymers.len()));
 
     let mut result = HashMap::new();
 
-    // Add top homopolymers by count
-    let mut sorted_homopolymers = homopolymers;
-    sorted_homopolymers.sort_by(|a, b| b.1.observed_count.cmp(&a.1.observed_count));
-    for (kmer, stats) in sorted_homopolymers.into_iter().take(max_homopolymers) {
-        result.insert(kmer.clone(), stats.clone());
-    }
-
-    // Add top non-homopolymer sequences
+    // Add top non-homopolymer sequences (optionally anti-reference-filtered)
     let mut sorted_others: Vec<_> = other_kmers.into_iter().collect();
     sorted_others.sort_by(|a, b| b.1.observed_count.cmp(&a.1.observed_count));
-    for (kmer, stats) in sorted_others.into_iter().take(remaining_slots) {
+
+    let max_errors = ((k as f64) * anti_reference_error_rate).ceil() as usize;
+
+    for (kmer, stats) in sorted_others {
+        if remaining_slots <= 0 {
+            break;
+        }
+
+        // If anti-reference provided, discard k-mers that match any anti-reference record
+        // within the allowed edit distance.
+        if let Some(anti_records) = anti_reference_records {
+            let mut hit = false;
+            for rec in anti_records {
+                if matches_any_within_edit_distance(&kmer, rec.seq(), max_errors, k) {
+                    hit = true;
+                    break;
+                }
+            }
+            if hit {
+                continue;
+            }
+        }
+
         result.insert(kmer.clone(), stats.clone());
+        remaining_slots = remaining_slots.saturating_sub(1);
     }
     
     let homo_count = result.iter().filter(|(_, stats)| stats.is_homopolymer).count();
@@ -1100,6 +1227,16 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
     let read_count = records.len();
     println!("Loaded {read_count} sequences with total length {total_length} bp");
 
+    // Load anti-reference records if requested
+    let anti_reference_records = if let Some(ref anti_ref) = config.anti_reference_path {
+        println!("Loading anti-reference records from {} ...", anti_ref.display());
+        let recs = load_anti_reference_records(anti_ref)?;
+        println!("  anti-reference: loaded {} records", recs.len());
+        Some(recs)
+    } else {
+        None
+    };
+
     // K-mer counting and top-N selection
     println!("K-mer counting and selection...");
     let enriched_kmers: HashMap<_, _> = k_values
@@ -1117,7 +1254,10 @@ pub fn run(file_path: &Path, args: &KmerEnrichmentArgs) -> Result<()> {
             };
             println!("Found {} {k}-mers above threshold", kmer_stats.len());
 
-            let selected_kmers = select_top_kmers(kmer_stats, k, config.top_kmers);
+            let selected_kmers = select_top_kmers(kmer_stats, k, config.top_kmers,
+                anti_reference_records.as_deref(),
+                config.anti_reference_error_rate,
+            );
             (k, selected_kmers)
         })
         .collect();
