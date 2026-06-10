@@ -615,21 +615,28 @@ fn select_top_kmers(
         .iter()
         .partition(|(_, stats)| stats.is_homopolymer);
 
-    // TODO: simplify this with pure / nosiy homopolymer filtering?
-    // Strategy: Keep some homopolymers, but focus on non-homopolymer sequences
-    let max_homopolymers = (top_n / 10).clamp(4, 20); // 10% for homopolymers, 4-20 range
-    let mut remaining_slots = top_n.saturating_sub(max_homopolymers.min(homopolymers.len()));
-
     let mut result = HashMap::new();
 
-    // Add top non-homopolymer sequences (optionally anti-reference-filtered)
+    // Retain only perfect (pure single-base) homopolymers — at most four per k.
+    // Imperfect homopolymers typically arise from sequencing errors and would otherwise
+    // crowd out genuine enriched sequences, so they are discarded here.
+    for (kmer, stats) in homopolymers {
+        if is_pure_homopolymer(kmer) {
+            result.insert(kmer.clone(), stats.clone());
+        }
+    }
+
+    // Fill the remaining slots with the most frequent non-homopolymer k-mers
+    // (optionally anti-reference-filtered).
+    let mut remaining_slots = top_n.saturating_sub(result.len());
+
     let mut sorted_others: Vec<_> = other_kmers.into_iter().collect();
     sorted_others.sort_by(|a, b| b.1.observed_count.cmp(&a.1.observed_count));
 
     let max_errors = ((k as f64) * anti_reference_error_rate).ceil() as usize;
 
     for (kmer, stats) in sorted_others {
-        if remaining_slots <= 0 {
+        if remaining_slots == 0 {
             break;
         }
 
