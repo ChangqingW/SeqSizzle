@@ -87,9 +87,14 @@ enum Commands {
     /// Summarize the reads with patterns specified by the --patterns argument or the adapter
     /// flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p
     /// my_patterns.csv --adapter-3p summarize`.
-    /// '..' indicats unmatched regions of positive length, 
-    /// '-' indicates the patterns are overlapped, 
-    /// print the number of reads that match each pattern combination in TSV format. 
+    /// '..' indicats unmatched regions of positive length,
+    /// '-' indicates the patterns are overlapped.
+    /// Prints, for each pattern combination, a cumulative and an exact value in TSV format
+    /// (three columns; with --counts the values are read counts, otherwise percentages of reads):
+    /// cumulative_count/cumulative_percent, exact_count/exact_percent, and pattern_combination.
+    /// The exact value is the number of reads matching that exact combination; the cumulative value
+    /// also adds the counts of every longer combination that contains it as a contiguous block.
+    /// Rows are sorted by the exact value.
     /// To be moved to the UI in the future.
     Summarize {
         /// Print the counts of each summarized catagory instead of the percentage
@@ -212,7 +217,11 @@ fn main() -> Result<()> {
                     records.push(record);
                     index += 1;
                 }
-                println!("number_of_read\tpattern_combination");
+                if counts {
+                    println!("cumulative_count\texact_count\tpattern_combination");
+                } else {
+                    println!("cumulative_percent\texact_percent\tpattern_combination");
+                }
                 print!(
                     "{}",
                     match_summarizing::fmt_summarised_reads(&match_summarizing::summarise_reads(

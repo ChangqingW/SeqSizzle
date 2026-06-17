@@ -42,7 +42,7 @@ A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing differen
 Usage: seqsizzle [OPTIONS] <FILE> [COMMAND]
 
 Commands:
-  summarize  Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped, print the number of reads that match each pattern combination in TSV format. To be moved to the UI in the future
+  summarize  Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped. Prints, for each pattern combination, a cumulative and an exact value in TSV format (three columns; with --counts the values are read counts, otherwise percentages of reads): cumulative_count/cumulative_percent, exact_count/exact_percent, and pattern_combination. The exact value is the number of reads matching that exact combination; the cumulative value also adds the counts of every longer combination that contains it as a contiguous block. Rows are sorted by the exact value. To be moved to the UI in the future
   enrich     Find enriched k-mers in the reads. This can be used to identify potential adapter/primer sequences
   help       Print this message or the help of the given subcommand(s)
 
@@ -151,7 +151,7 @@ AGATCGGAAGAGCGTCGTGTAG,22,3441,0.34,assembled from k=12,384.5,32.4
 ### summarize
 `seqsizzle summarize --help`:
 ```
-Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped, print the number of reads that match each pattern combination in TSV format. To be moved to the UI in the future
+Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped. Prints, for each pattern combination, a cumulative and an exact value in TSV format (three columns; with --counts the values are read counts, otherwise percentages of reads): cumulative_count/cumulative_percent, exact_count/exact_percent, and pattern_combination. The exact value is the number of reads matching that exact combination; the cumulative value also adds the counts of every longer combination that contains it as a contiguous block. Rows are sorted by the exact value. To be moved to the UI in the future
 
 Usage: seqsizzle <FILE> summarize [OPTIONS]
 
@@ -162,19 +162,22 @@ Options:
 Example output:
 `seqsizzle test.fastq --adapter-3p summarize > summarize.txt`
 ```
-tail summarize.txt
-1%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AAAAAAAAAAAA..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
-1%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..TTTTTTTTTTTT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
-1%	..TGGTATCAACGCAGAGTACATGGG..AGATCGGAAGAGCGTCGTGTAG
-1%	CTACACGACGCTCTTCCGATCT..CCCATGTACTCTGCGTTGATACCA..
-3%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..AAAAAAAAAAAA..CCCATGTACTCTGCGTTGATACCA..
-3%	..TGGTATCAACGCAGAGTACATGGG..TTTTTTTTTTTT..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
-6%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
-6%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
-34%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
-36%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
+head -1 summarize.txt; tail summarize.txt
+cumulative_percent	exact_percent	pattern_combination
+1%	1%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AAAAAAAAAAAA..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
+1%	1%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..TTTTTTTTTTTT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
+1%	1%	..TGGTATCAACGCAGAGTACATGGG..AGATCGGAAGAGCGTCGTGTAG
+1%	1%	CTACACGACGCTCTTCCGATCT..CCCATGTACTCTGCGTTGATACCA..
+3%	3%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..AAAAAAAAAAAA..CCCATGTACTCTGCGTTGATACCA..
+3%	3%	..TGGTATCAACGCAGAGTACATGGG..TTTTTTTTTTTT..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
+6%	6%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
+6%	6%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
+34%	34%	..TGGTATCAACGCAGAGTACATGGG..AAAAAAAAAAAA..AGATCGGAAGAGCGTCGTGTAG
+36%	36%	CTACACGACGCTCTTCCGATCT..TTTTTTTTTTTT..CCCATGTACTCTGCGTTGATACCA..
 ```
-The output indicates 36% of reads contains the R1 adaptor, followed by a polyT stretch and the TSO sequence. The line above (files sorted by percentage) indicates that 34% of reads are the reverse complement of that. The `..` indicates an insertion of unmatched sequence.
+The output indicates 36% of reads contains the R1 adaptor, followed by a polyT stretch and the TSO sequence. The line above (rows sorted by `exact_percent`) indicates that 34% of reads are the reverse complement of that. The `..` indicates an insertion of unmatched sequence.
+
+The two value columns are `exact_percent` — reads matching exactly that combination — and `cumulative_percent`, which also adds every longer combination that contains it as a contiguous block (separators must match). With `--counts` the same two columns are reported as read counts (`exact_count`, `cumulative_count`) instead of percentages. The two columns coincide for the most common combinations above because none of them is contained in a longer one; shorter combinations elsewhere in the file have a higher cumulative value than exact value.
 
 # Roadmap
 ## functionality 
