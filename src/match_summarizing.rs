@@ -110,35 +110,6 @@ fn test_pattern(s: &str) -> SearchPattern {
 }
 
 #[test]
-fn test_trim_flanking_space() {
-    let a = test_pattern("AAAA");
-    let b = test_pattern("CCCC");
-    let flanked = vec![
-        ReadParts::Space,
-        ReadParts::Match(a.clone()),
-        ReadParts::Space,
-        ReadParts::Match(b.clone()),
-        ReadParts::Space,
-    ];
-    let trimmed = trim_flanking_space(&flanked);
-    assert_eq!(
-        trimmed,
-        &[
-            ReadParts::Match(a.clone()),
-            ReadParts::Space,
-            ReadParts::Match(b.clone()),
-        ]
-    );
-
-    // No flanking space: unchanged.
-    let bare = vec![ReadParts::Match(a), ReadParts::Space, ReadParts::Match(b)];
-    assert_eq!(trim_flanking_space(&bare), bare.as_slice());
-
-    // All space: empty.
-    assert!(trim_flanking_space(&[ReadParts::Space, ReadParts::Space]).is_empty());
-}
-
-#[test]
 fn test_is_contained() {
     let a = test_pattern("AAAA");
     let b = test_pattern("CCCC");
@@ -199,6 +170,22 @@ fn test_is_contained() {
 
     // Equal / identical length never counts as contained.
     assert!(!is_contained(&longer_prefix, &longer_prefix));
+
+    // Flanking `..` is part of the comparison: a leading Space must align.
+    let with_flank = vec![
+        ReadParts::Space,
+        ReadParts::Match(a.clone()),
+        ReadParts::Space,
+        ReadParts::Match(b.clone()),
+    ];
+    let no_leading_flank = vec![
+        ReadParts::Match(a.clone()),
+        ReadParts::Space,
+        ReadParts::Match(b.clone()),
+        ReadParts::Space,
+        ReadParts::Match(c.clone()),
+    ];
+    assert!(!is_contained(&with_flank, &no_leading_flank));
 }
 
 #[cfg(test)]
@@ -248,7 +235,7 @@ fn test_summarise_cumulative() {
     assert_eq!(long_row.exact_count, 2);
     assert_eq!(long_row.count, 2, "long has no superset");
 
-    // The single AAAA match is a contiguous token of both the short (3) and long (2)
+    // "..AAAA.." is a contiguous prefix block of both the short (3) and long (2)
     // combinations, so its cumulative count is own 5 + 3 + 2 = 10.
     let one_row = find("..AAAA..");
     assert_eq!(one_row.exact_count, 5);
@@ -266,25 +253,10 @@ pub struct SummaryRow {
     pub exact_count: usize,
 }
 
-/// Return the sub-slice of `parts` with leading and trailing `Space` removed.
-/// `NegativeSpace` only ever appears between matches, so trimming `Space` is
-/// sufficient to make read-boundary flanks irrelevant to containment.
-fn trim_flanking_space(parts: &[ReadParts]) -> &[ReadParts] {
-    let start = parts
-        .iter()
-        .position(|p| !matches!(p, ReadParts::Space))
-        .unwrap_or(parts.len());
-    let end = parts
-        .iter()
-        .rposition(|p| !matches!(p, ReadParts::Space))
-        .map_or(start, |i| i + 1);
-    &parts[start..end]
-}
-
-/// Returns true if the (already trimmed) `shorter` combination appears as a
-/// strictly-contiguous sub-slice of the (already trimmed) `longer` one, with
-/// separators matching exactly. Requires `shorter` to be strictly shorter so
-/// identical combinations do not aggregate into each other.
+/// Returns true if the `shorter` combination appears as a strictly-contiguous
+/// sub-slice of the `longer` one, with all parts compared exactly — matches,
+/// internal `..`/`-` separators, and flanking `..` alike. Requires `shorter` to
+/// be strictly shorter so identical combinations do not aggregate into each other.
 fn is_contained(shorter: &[ReadParts], longer: &[ReadParts]) -> bool {
     if shorter.is_empty() || shorter.len() >= longer.len() {
         return false;
@@ -308,12 +280,6 @@ pub fn summarise_reads(
     // Collect raw (parts, exact_count) groups.
     let groups: Vec<(Vec<ReadParts>, usize)> = map.into_iter().collect();
 
-    // Pre-compute trimmed views once for the O(n^2) containment scan.
-    let trimmed: Vec<&[ReadParts]> = groups
-        .iter()
-        .map(|(parts, _)| trim_flanking_space(parts))
-        .collect();
-
     // For each group, add the counts of every longer group that contains it.
     // Containment is transitive, so summing all containing supersets directly
     // yields the full cumulative total.
@@ -322,8 +288,8 @@ pub fn summarise_reads(
         .enumerate()
         .map(|(i, (parts, exact))| {
             let mut cumulative = *exact;
-            for (j, (_, other_exact)) in groups.iter().enumerate() {
-                if i != j && is_contained(trimmed[i], trimmed[j]) {
+            for (j, (other_parts, other_exact)) in groups.iter().enumerate() {
+                if i != j && is_contained(parts, other_parts) {
                     cumulative += *other_exact;
                 }
             }
