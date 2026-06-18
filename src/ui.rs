@@ -1,4 +1,4 @@
-use crate::app::{App, UIMode};
+use crate::app::{App, QualityStyleMode, UIMode};
 
 
 use ratatui::{
@@ -72,38 +72,74 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     }
 
     if let UIMode::Options = app.mode {
-        let area = centered_rect(60, 60, frame.area());
+        let area = options_area(frame.area());
         frame.render_widget(Clear, area);
         frame.render_widget(
-            Paragraph::new("Coming soon.")
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Options")
-                        .title_top(Line::from("[x]").alignment(Alignment::Right))
-                        .title_bottom(Line::from("Esc to close").alignment(Alignment::Right)),
-                )
-                .wrap(Wrap { trim: false }),
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Options")
+                .title_top(Line::from("[x]").alignment(Alignment::Right))
+                .title_bottom(Line::from("Esc to close").alignment(Alignment::Right)),
             area,
         );
+        let italic_on = matches!(
+            app.styling_config.quality_style_mode,
+            QualityStyleMode::Italic | QualityStyleMode::Both
+        );
+        let background_on = matches!(
+            app.styling_config.quality_style_mode,
+            QualityStyleMode::Background | QualityStyleMode::Both
+        );
+        for (i, item) in OPTION_ITEMS.iter().enumerate() {
+            let (on, label, desc) = match item {
+                OptionItem::Copy => (
+                    app.copy,
+                    "Copy mode (c)",
+                    "(press c to enable clicking again)",
+                ),
+                OptionItem::Italic => (italic_on, "Low-quality italic (i)", ""),
+                OptionItem::Background => {
+                    (background_on, "Quality background coloring (b)", "")
+                }
+            };
+            let check = if on { "[x]" } else { "[ ]" };
+            let check_style = Style::default().fg(if on { Color::Green } else { Color::DarkGray });
+            let row = option_row(area, i);
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(format!("{check} "), check_style),
+                    Span::raw(label),
+                ])),
+                row,
+            );
+            if !desc.is_empty() {
+                frame.render_widget(
+                    Paragraph::new(Span::styled(
+                        format!("    {desc}"),
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    Rect::new(row.x, row.y + 1, row.width, 1),
+                );
+            }
+        }
     }
 
     if let UIMode::Help = app.mode {
         let area = centered_rect(50, 60, frame.area());
         frame.render_widget(Clear, area);
         let bindings = [
-            ("/  or  Ctrl-f", "toggle search panel"),
-            ("c", "toggle copy mode"),
-            ("j / k  or  \u{2193} / \u{2191}", "scroll down / up"),
-            ("Ctrl-d / Ctrl-u", "page down / up"),
-            ("gg", "jump to top"),
-            ("i", "toggle low-quality italic"),
-            ("b", "toggle quality background"),
-            ("?", "this help"),
-            ("q", "quit"),
-            ("Esc", "close popup / panel"),
+            ("/ or Ctrl-f ", "toggle search panel"),
+            ("j / k or \u{2193} / \u{2191} ", "scroll down / up"),
+            ("Ctrl-d / Ctrl-u ", "page down / up"),
+            ("gg ", "jump to top"),
+            ("i ", "toggle low-quality italic"),
+            ("b ", "toggle quality background"),
+            ("? ", "this help"),
+            ("q ", "quit"),
+            ("Esc ", "close popup / panel"),
+            ("c ", "toggle copy mode"),
         ];
-        let lines: Vec<Line> = bindings
+        let mut lines: Vec<Line> = bindings
             .iter()
             .map(|(key, desc)| {
                 Line::from(vec![
@@ -115,6 +151,13 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                 ])
             })
             .collect();
+        lines.push(Line::from(Span::styled(
+                    "Clicking and mouse text-selection can't both be active: copy mode \
+                    releases the mouse so the terminal can select text. Most terminals also \
+                    let you hold Shift and drag to select text with copy mode off.",
+                    Style::default().fg(Color::DarkGray)
+                    )));
+                
         frame.render_widget(
             Paragraph::new(lines)
                 .block(
@@ -129,6 +172,47 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             area,
         );
     }
+}
+
+/// Toggles shown in the Options pane, in display order. Single source of truth shared by
+/// rendering (ui.rs) and click mapping (control.rs).
+#[derive(Clone, Copy)]
+pub enum OptionItem {
+    Copy,
+    Italic,
+    Background,
+}
+pub const OPTION_ITEMS: [OptionItem; 3] =
+    [OptionItem::Copy, OptionItem::Italic, OptionItem::Background];
+
+// Options-pane layout, relative to the pane rect's top-left.
+const OPT_X_PAD: u16 = 2;
+const OPT_Y_PAD: u16 = 2;
+const OPT_ROW_STRIDE: u16 = 2; // toggle line + description/spacer line
+
+/// The rect (centered popup) used for the Options pane.
+pub fn options_area(area: Rect) -> Rect {
+    centered_rect(60, 60, area)
+}
+
+/// The toggle line rect for option `index` within the Options pane `area`.
+pub fn option_row(area: Rect, index: usize) -> Rect {
+    let x = area.x + OPT_X_PAD;
+    let y = area.y + OPT_Y_PAD + (index as u16) * OPT_ROW_STRIDE;
+    let width = area.width.saturating_sub(2 * OPT_X_PAD);
+    Rect::new(x, y, width, 1)
+}
+
+/// Which option's clickable band (its toggle line + description/spacer line) contains
+/// (col, row), if any.
+pub fn options_hit(area: Rect, col: u16, row: u16) -> Option<usize> {
+    for i in 0..OPTION_ITEMS.len() {
+        let r = option_row(area, i);
+        if col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + OPT_ROW_STRIDE {
+            return Some(i);
+        }
+    }
+    None
 }
 
 /// Returns the (options, patterns) button rects on the bottom border row of `area`.

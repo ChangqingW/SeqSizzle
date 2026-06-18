@@ -91,7 +91,20 @@ fn handle_mouse_search_panel(app: &App, tui: &Tui, mouse: MouseEvent) -> Update 
 }
 
 fn handle_mouse_viewer(app: &App, tui: &Tui, mouse: MouseEvent) -> Update {
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) || app.copy {
+    // scroll wheel acts like the up / down arrow keys
+    match mouse.kind {
+        MouseEventKind::ScrollUp => return Update::ScrollViewer(-1),
+        MouseEventKind::ScrollDown => return Update::ScrollViewer(1),
+        _ => {}
+    }
+    if app.copy {
+        return Update::None;
+    }
+    // hint when the user drags to select text: capture is on, so native selection is off
+    if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
+        return Update::Msg("press c to toggle copy mode".to_string());
+    }
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
         return Update::None;
     }
     let size = tui.size();
@@ -102,7 +115,8 @@ fn handle_mouse_viewer(app: &App, tui: &Tui, mouse: MouseEvent) -> Update {
     } else if rect_contains(options, mouse.column, mouse.row) {
         Update::OpenOptions
     } else {
-        Update::None
+        // a click off the buttons: hint how to get native text selection back
+        Update::Msg("press c to toggle copy mode".to_string())
     }
 }
 
@@ -112,21 +126,46 @@ fn handle_mouse_options(tui: &Tui, mouse: MouseEvent) -> Update {
     }
     let size = tui.size();
     let full = Rect::new(0, 0, size.width, size.height);
-    let area = crate::ui::centered_rect(60, 60, full);
+    let area = crate::ui::options_area(full);
     // close button: "[x]" on the top border, near the right corner
     let right = area.x + area.width;
     if mouse.row == area.y && mouse.column >= right.saturating_sub(4) && mouse.column < right {
-        Update::CloseOverlay
-    } else {
-        Update::None
+        return Update::CloseOverlay;
+    }
+    match crate::ui::options_hit(area, mouse.column, mouse.row) {
+        Some(i) => option_update(crate::ui::OPTION_ITEMS[i]),
+        None => Update::None,
+    }
+}
+
+/// Maps an Options-pane item to the update that toggles it.
+fn option_update(item: crate::ui::OptionItem) -> Update {
+    match item {
+        crate::ui::OptionItem::Copy => Update::ToggleCopyMode,
+        crate::ui::OptionItem::Italic => Update::ToggleQualityItalic,
+        crate::ui::OptionItem::Background => Update::ToggleQualityBackground,
     }
 }
 
 fn handle_input_options(keyevent: KeyEvent) -> Update {
-    if keyevent.code == KeyCode::Esc {
-        Update::CloseOverlay
-    } else {
-        Update::None
+    match keyevent {
+        KeyEvent { code: KeyCode::Esc, .. } => Update::CloseOverlay,
+        KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => Update::ToggleCopyMode,
+        KeyEvent {
+            code: KeyCode::Char('i'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => Update::ToggleQualityItalic,
+        KeyEvent {
+            code: KeyCode::Char('b'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => Update::ToggleQualityBackground,
+        _ => Update::None,
     }
 }
 
