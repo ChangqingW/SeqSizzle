@@ -2,6 +2,9 @@
 
 Notable changes to this project will be documented in this file.
 
+## [0.5.0]
+ * Support mouse clicks 
+
 ## [0.4.1]
  * Fixed copy mode not working on startup
 
