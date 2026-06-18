@@ -25,6 +25,9 @@ shadow!(build);
 
 pub const DEFAULT_QUALITY_THRESHOLD: u8 = 10;
 
+/// Max delay between two clicks on the same pattern to count as a double-click.
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+
 /// A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.
 #[derive(Parser, Debug)]
 #[command(author, about, long_about = None)]
@@ -261,7 +264,23 @@ fn main() -> Result<()> {
         let updates: Update = handle_input(&app, &tui, tui.events.next()?);
         match updates {
             Update::None => continue, // no need to re-draw
-            Update::ToggleUIMode => app.toggle_ui_mode(),
+            Update::ToggleUIMode => {
+                app.toggle_ui_mode();
+                // The search panel needs mouse capture so its regions are clickable.
+                // When returning to the viewer, restore the copy-mode behaviour.
+                match app.mode {
+                    app::UIMode::SearchPanel(_) => {
+                        crossterm::execute!(std::io::stderr(), EnableMouseCapture)?;
+                    }
+                    app::UIMode::Viewer => {
+                        if app.copy {
+                            crossterm::execute!(std::io::stderr(), DisableMouseCapture)?;
+                        } else {
+                            crossterm::execute!(std::io::stderr(), EnableMouseCapture)?;
+                        }
+                    }
+                }
+            }
             Update::ToggleCopyMode => {
                 if app.copy {
                     app.copy = false;
@@ -285,6 +304,27 @@ fn main() -> Result<()> {
             }
             Update::SearchPanelFocusNext(reverse) => {
                 app.search_panel.focus_next(reverse);
+            }
+            Update::SearchPanelFocus(name) => {
+                app.search_panel.focus(name);
+            }
+            Update::SearchPanelSelectPattern(idx) => {
+                app.search_panel
+                    .focus(search_panel::PanelElementName::PatternsList);
+                app.search_panel.select_pattern(idx);
+                let now = std::time::Instant::now();
+                let double = matches!(
+                    app.last_pattern_click,
+                    Some((t, i)) if i == idx && now.duration_since(t) < DOUBLE_CLICK
+                );
+                if double {
+                    // same as selecting the pattern and hitting Enter: pop into edit boxes
+                    app.edit_search_pattern(idx);
+                    app.search_panel.focus_next(false);
+                    app.last_pattern_click = None;
+                } else {
+                    app.last_pattern_click = Some((now, idx));
+                }
             }
             Update::SearchPanelInput(input) => {
                 app.search_panel.handle_input(input);

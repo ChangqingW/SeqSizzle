@@ -13,6 +13,7 @@ use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[cfg(debug_assertions)]
 const RENDER_BUF_SIZE: usize = 24;
@@ -75,6 +76,8 @@ pub struct App<'a> {
     reader: SequenceReader<File>,
     message: TransientMessage,
     pub styling_config: StylingConfig,
+    // time and index of the last patterns-list click, for double-click detection
+    pub last_pattern_click: Option<(Instant, usize)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -139,6 +142,7 @@ impl App<'_> {
             rendered_lines: VecDeque::with_capacity(2 * (RENDER_BUF_SIZE + 1)),
             scroll_status: (0, 0),
             styling_config: StylingConfig::default(),
+            last_pattern_click: None,
         };
         instance.update();
         Ok(instance)

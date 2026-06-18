@@ -36,6 +36,7 @@ fn search_patterns_to_list<'a>(search_patterns: &[SearchPattern]) -> List<'a> {
     .block(
         Block::default()
             .title("Search patterns")
+            .title_top(Line::from("[x]").alignment(Alignment::Right))
             .borders(Borders::ALL),
     )
     .highlight_style(Style::default().add_modifier(Modifier::BOLD))
@@ -190,6 +191,16 @@ impl PanelElement<'_> {
     }
 }
 
+/// Result of hit-testing a click inside the search panel.
+pub enum PanelClick {
+    /// A region was clicked; focus it.
+    Focus(PanelElementName),
+    /// A specific pattern row in the patterns list was clicked.
+    Pattern(usize),
+    /// The close button ([x], top-right corner) was clicked.
+    Close,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PanelElementName {
     PatternsList,
@@ -245,6 +256,59 @@ impl<'a> SearchPanel<'a> {
     /// focus the next element in the given direction (true for forward, false for backward)
     pub fn focus_next(&mut self, reverse: bool) {
         self.focused_element = self.focused_element.next(reverse);
+    }
+
+    /// focus a specific element by name
+    pub fn focus(&mut self, name: PanelElementName) {
+        self.focused_element = name;
+    }
+
+    /// select a specific pattern in the patterns list by index
+    pub fn select_pattern(&mut self, index: usize) {
+        match self
+            .elements
+            .get_mut(&PanelElementName::PatternsList)
+            .unwrap()
+        {
+            PanelElement::ListElement(list) => list.element.state.select(Some(index)),
+            _ => panic!("Wrong type of element"),
+        }
+    }
+
+    /// hit-test a click at (col, row); `area` is the panel's rect (the centered_rect
+    /// computed in ui.rs). Returns what was clicked, if anything.
+    pub fn handle_click(&self, area: Rect, col: u16, row: u16) -> Option<PanelClick> {
+        // close button: the "[x]" on the top border, near the right corner
+        let right = area.x + area.width;
+        if row == area.y && col >= right.saturating_sub(4) && col < right {
+            return Some(PanelClick::Close);
+        }
+        let chunks = (self.layout)(area);
+        for (i, (name, element)) in self.elements.iter().enumerate() {
+            let chunk = chunks[i];
+            let inside = col >= chunk.x
+                && col < chunk.x + chunk.width
+                && row >= chunk.y
+                && row < chunk.y + chunk.height;
+            if !inside {
+                continue;
+            }
+            if *name == PanelElementName::PatternsList {
+                if let PanelElement::ListElement(list) = element {
+                    // inner area starts below the top border
+                    let inner_top = chunk.y + 1;
+                    if row >= inner_top {
+                        let idx = (row - inner_top) as usize + list.element.state.offset();
+                        if idx < list.element.list.len() {
+                            return Some(PanelClick::Pattern(idx));
+                        }
+                    }
+                }
+                return Some(PanelClick::Focus(PanelElementName::PatternsList));
+            }
+            return Some(PanelClick::Focus(name.clone()));
+        }
+        None
     }
 
     /// cycle through the list of patterns selection
@@ -304,7 +368,8 @@ impl<'a> SearchPanel<'a> {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(ACTIVE_BOARDER_STYLE)
-                .title("Search patterns"),
+                .title("Search patterns")
+                .title_top(Line::from("[x]").alignment(Alignment::Right)),
         ));
 
         let mut elements: BTreeMap<PanelElementName, PanelElement> = BTreeMap::new();

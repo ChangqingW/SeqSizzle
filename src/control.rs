@@ -1,12 +1,14 @@
 use crate::app::{App, SearchPattern, UIMode};
-use crate::search_panel::{PanelElement, PanelElementName};
+use crate::search_panel::{PanelClick, PanelElement, PanelElementName};
 use crate::{Event, Tui};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::prelude::{Color, Size};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::prelude::{Color, Rect, Size};
 use std::str::FromStr;
 
 pub enum Update {
     SearchPanelFocusNext(bool),
+    SearchPanelFocus(PanelElementName),
+    SearchPanelSelectPattern(usize),
     SearchPanelInput(KeyEvent),
     SaveFilePopupInput(KeyEvent),
     ToggleFilePopup,
@@ -50,8 +52,27 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
             UIMode::SearchPanel(false) => handle_input_search_panel(app, tui, keyevent),
             UIMode::SearchPanel(true) => handle_input_file_save(app, tui, keyevent),
         },
+        Event::Mouse(m) => match app.mode {
+            UIMode::SearchPanel(false) => handle_mouse_search_panel(app, tui, m),
+            _ => Update::None,
+        },
         Event::Resize(_, _) => Update::WindowResize(tui.size()),
         _ => Update::None,
+    }
+}
+
+fn handle_mouse_search_panel(app: &App, tui: &Tui, mouse: MouseEvent) -> Update {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return Update::None;
+    }
+    let size = tui.size();
+    let full = Rect::new(0, 0, size.width, size.height);
+    let panel = crate::ui::centered_rect(80, 80, full);
+    match app.search_panel.handle_click(panel, mouse.column, mouse.row) {
+        Some(PanelClick::Focus(name)) => Update::SearchPanelFocus(name),
+        Some(PanelClick::Pattern(idx)) => Update::SearchPanelSelectPattern(idx),
+        Some(PanelClick::Close) => Update::ToggleUIMode,
+        None => Update::None,
     }
 }
 
