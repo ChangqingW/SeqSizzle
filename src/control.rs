@@ -16,6 +16,9 @@ pub enum Update {
     CycleSearchPattern(bool),
     ToggleUIMode,
     ToggleCopyMode,
+    OpenOptions,
+    OpenHelp,
+    CloseOverlay,
     ScrollViewer(isize),
     WindowResize(Size),
     ToggleQualityItalic,
@@ -51,9 +54,20 @@ pub fn handle_input(app: &App, tui: &Tui, input: Event) -> Update {
             UIMode::Viewer => handle_input_viewer(app, tui, keyevent),
             UIMode::SearchPanel(false) => handle_input_search_panel(app, tui, keyevent),
             UIMode::SearchPanel(true) => handle_input_file_save(app, tui, keyevent),
+            UIMode::Options => handle_input_options(keyevent),
+            UIMode::Help => handle_input_help(keyevent),
         },
         Event::Mouse(m) => match app.mode {
+            UIMode::Viewer => handle_mouse_viewer(app, tui, m),
             UIMode::SearchPanel(false) => handle_mouse_search_panel(app, tui, m),
+            UIMode::Options => handle_mouse_options(tui, m),
+            UIMode::Help => {
+                if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                    Update::CloseOverlay
+                } else {
+                    Update::None
+                }
+            }
             _ => Update::None,
         },
         Event::Resize(_, _) => Update::WindowResize(tui.size()),
@@ -74,6 +88,55 @@ fn handle_mouse_search_panel(app: &App, tui: &Tui, mouse: MouseEvent) -> Update 
         Some(PanelClick::Close) => Update::ToggleUIMode,
         None => Update::None,
     }
+}
+
+fn handle_mouse_viewer(app: &App, tui: &Tui, mouse: MouseEvent) -> Update {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) || app.copy {
+        return Update::None;
+    }
+    let size = tui.size();
+    let full = Rect::new(0, 0, size.width, size.height);
+    let (options, patterns) = crate::ui::viewer_buttons(full);
+    if rect_contains(patterns, mouse.column, mouse.row) {
+        Update::ToggleUIMode // open the search panel from the viewer
+    } else if rect_contains(options, mouse.column, mouse.row) {
+        Update::OpenOptions
+    } else {
+        Update::None
+    }
+}
+
+fn handle_mouse_options(tui: &Tui, mouse: MouseEvent) -> Update {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return Update::None;
+    }
+    let size = tui.size();
+    let full = Rect::new(0, 0, size.width, size.height);
+    let area = crate::ui::centered_rect(60, 60, full);
+    // close button: "[x]" on the top border, near the right corner
+    let right = area.x + area.width;
+    if mouse.row == area.y && mouse.column >= right.saturating_sub(4) && mouse.column < right {
+        Update::CloseOverlay
+    } else {
+        Update::None
+    }
+}
+
+fn handle_input_options(keyevent: KeyEvent) -> Update {
+    if keyevent.code == KeyCode::Esc {
+        Update::CloseOverlay
+    } else {
+        Update::None
+    }
+}
+
+fn handle_input_help(_keyevent: KeyEvent) -> Update {
+    Update::CloseOverlay
+}
+
+/// Whether (col, row) falls inside `rect`.
+fn rect_contains(rect: Rect, col: u16, row: u16) -> bool {
+    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
 }
 
 fn handle_input_file_save(app: &App, _tui: &Tui, keyevent: KeyEvent) -> Update {
@@ -158,6 +221,12 @@ pub fn handle_input_viewer(_app: &App, tui: &Tui, keyevent: KeyEvent) -> Update 
             modifiers: KeyModifiers::NONE,
             ..
         } => Update::ToggleQualityBackground,
+
+        // Open the key-reference help popup with '?'
+        KeyEvent {
+            code: KeyCode::Char('?'),
+            ..
+        } => Update::OpenHelp,
         _ => Update::None,
     }
 }

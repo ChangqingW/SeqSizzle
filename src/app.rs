@@ -102,6 +102,8 @@ impl SearchPattern {
 pub enum UIMode {
     Viewer,
     SearchPanel(bool), // bool: save file popup
+    Options,           // options pane (contents TBD)
+    Help,              // key-reference popup
 }
 
 #[derive(Default, Debug)]
@@ -178,9 +180,9 @@ impl App<'_> {
     }
 
     pub fn toggle_ui_mode(&mut self) {
-        match &self.mode {
-            UIMode::Viewer => self.mode = UIMode::SearchPanel(false),
-            UIMode::SearchPanel(_) => self.mode = UIMode::Viewer,
+        self.mode = match self.mode {
+            UIMode::Viewer => UIMode::SearchPanel(false),
+            _ => UIMode::Viewer,
         };
     }
 

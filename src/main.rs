@@ -258,39 +258,26 @@ fn main() -> Result<()> {
     tui.enter(!app.copy)?;
     tui.draw(&mut app)?;
 
+    // Tracks the current mouse-capture state so we only emit toggle sequences on change.
+    let mut mouse_captured = !app.copy;
+
     // Start the main loop.
     while !app.quit {
         // Handle events.
         let updates: Update = handle_input(&app, &tui, tui.events.next()?);
         match updates {
             Update::None => continue, // no need to re-draw
-            Update::ToggleUIMode => {
-                app.toggle_ui_mode();
-                // The search panel needs mouse capture so its regions are clickable.
-                // When returning to the viewer, restore the copy-mode behaviour.
-                match app.mode {
-                    app::UIMode::SearchPanel(_) => {
-                        crossterm::execute!(std::io::stderr(), EnableMouseCapture)?;
-                    }
-                    app::UIMode::Viewer => {
-                        if app.copy {
-                            crossterm::execute!(std::io::stderr(), DisableMouseCapture)?;
-                        } else {
-                            crossterm::execute!(std::io::stderr(), EnableMouseCapture)?;
-                        }
-                    }
-                }
-            }
+            Update::ToggleUIMode => app.toggle_ui_mode(),
+            Update::OpenOptions => app.mode = app::UIMode::Options,
+            Update::OpenHelp => app.mode = app::UIMode::Help,
+            Update::CloseOverlay => app.mode = app::UIMode::Viewer,
             Update::ToggleCopyMode => {
-                if app.copy {
-                    app.copy = false;
-                    crossterm::execute!(std::io::stderr(), EnableMouseCapture)?;
-                    app.set_message(String::from("Copy mode OFF"));
+                app.copy = !app.copy;
+                app.set_message(String::from(if app.copy {
+                    "Copy mode ON"
                 } else {
-                    app.copy = true;
-                    crossterm::execute!(std::io::stderr(), DisableMouseCapture)?;
-                    app.set_message(String::from("Copy mode ON"));
-                }
+                    "Copy mode OFF"
+                }));
             }
             Update::WindowResize(rect) => {
                 app.resized_update(rect);
@@ -368,6 +355,20 @@ fn main() -> Result<()> {
                 app.update(); // Refresh display
             }
         };
+
+        // Sync mouse capture with the current state: capture is needed for clickable
+        // panes (search/options) and for the viewer buttons (shown when copy is off);
+        // in copy-mode viewer we leave it off so terminal text selection works.
+        let want_mouse =
+            matches!(app.mode, app::UIMode::SearchPanel(_) | app::UIMode::Options) || !app.copy;
+        if want_mouse != mouse_captured {
+            if want_mouse {
+                crossterm::execute!(std::io::stderr(), EnableMouseCapture)?;
+            } else {
+                crossterm::execute!(std::io::stderr(), DisableMouseCapture)?;
+            }
+            mouse_captured = want_mouse;
+        }
 
         // Render the user interface.
         tui.draw(&mut app)?;
