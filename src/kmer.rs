@@ -328,11 +328,11 @@ fn validate_args(args: &KmerEnrichmentArgs) -> Result<()> {
         ));
     }
     
-    if !(args.k_min == args.k_max) && args.k_step == 0 {
+    if args.k_min != args.k_max && args.k_step == 0 {
         return Err(anyhow::anyhow!("k-step must be greater than 0"));
     }
     
-    if !(args.k_min == args.k_max) && args.k_step > (args.k_max - args.k_min) {
+    if args.k_min != args.k_max && args.k_step > (args.k_max - args.k_min) {
         return Err(anyhow::anyhow!(
             "k-step ({}) is too large for the given k-range ({} to {})",
             args.k_step, args.k_min, args.k_max
@@ -631,7 +631,7 @@ fn select_top_kmers(
     let mut remaining_slots = top_n.saturating_sub(result.len());
 
     let mut sorted_others: Vec<_> = other_kmers.into_iter().collect();
-    sorted_others.sort_by(|a, b| b.1.observed_count.cmp(&a.1.observed_count));
+    sorted_others.sort_by_key(|b| std::cmp::Reverse(b.1.observed_count));
 
     let max_errors = ((k as f64) * anti_reference_error_rate).ceil() as usize;
 
@@ -645,7 +645,7 @@ fn select_top_kmers(
         if let Some(anti_records) = anti_reference_records {
             let mut hit = false;
             for rec in anti_records {
-                if matches_any_within_edit_distance(&kmer, rec.seq(), max_errors, k) {
+                if matches_any_within_edit_distance(kmer, rec.seq(), max_errors, k) {
                     hit = true;
                     break;
                 }

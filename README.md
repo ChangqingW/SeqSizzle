@@ -84,20 +84,26 @@ Options:
 ### Viewer mode
 ![Viewer mode](./img/viewer_mode.png)
 Up / down arrow (or `j` / `k`) to scroll by one line, `Ctrl+U` / `Ctrl+D` to scoll half a screen.  
+The mouse scroll wheel also scrolls up / down by one line when copy mode is off.  
 `/` (or `Ctrl+F`) to toggle search panel, `q` to quit.  
 `i` to toggle **I**talics for low quality bases (threshold define by `--quality-threshold`, default 10).  
 `b` to toggle **B**ackground color styling based on quality scores  
+`?` to open a key-reference help popup (any key or click closes it).  
+`c` to toggle **C**opy mode (see [Copy mode](#copy-mode) below).  
+`o` to toggle **O**ptions panel.  
 Viewer mode with background color styling enabled would make forground colors hard to distinguish:
 ![Viewer mode with background color styling](./img/viewer_mode_background_coloring.png)
 Make sure your terminal supports 256 colors (e.g. terminal emulators like iterm2, kitty, etc.) and your font support italics and bold styles otherwise it may look less appealing.
 
+### Copy mode
+Clicking and native terminal text selection cannot both be active at once. SeqSizzle **starts in copy mode**, which releases the mouse so you can select and copy text with your terminal as usual. In this mode, you will need to use the `/`, `o` keys to open the search panel and option panel as clicking does not work. The popup panels always accept clicking and ignores copy mode.
+Press `c` to turn copy mode off, which make the `[patterns]`  and `[options]` buttons available. Most terminals also let you hold **Shift** and drag to select text even with copy mode off.
+
 ### search panel mode
 ![Search panel mode](./img/search_panel.png)
-Left / right arrow (or Tab / Shift-Tab) to cycle through different input fields and the patterns list.  
-When on the patterns list field, up / down arrows cycle through patterns, `Backspace` (or `Delete`, `d`) to delete the selected pattern and `Return` to pop the pattern into the input fields for editing.  
-`Return` to add current inputs into the search pattern list (when focusing on any of the input boxes, rather than the patterns list).  
+The panel is always clickable: click an input box to focus it, click a pattern row to select it, and double-click a pattern to pop it into the input fields for editing. Press `Return` to add current inputs into the search pattern list (when focusing on any of the input boxes, rather than the patterns list). `Backspace` (or `Delete`, `d`) when a pattern is selected deletes the selected pattern from the list.  
+You can also navigate the pane using keyboard only: Left / right arrow (or Tab / Shift-Tab) to cycle through different input fields and the patterns list. When on the patterns list field, up / down arrows cycle through patterns, `Return` to pop the selected pattern into the input fields for editing. `/` or `Esc` to close the search panel.  
 Use **Shift +** arrow keys to move cursor within an input field (as arrow keys alone are bind to cycling input fields).  
-`/` or `Esc` to close the search panel.
 
 ## Subcommands
 ### enrich
@@ -188,4 +194,4 @@ The two value columns are `exact_percent` — reads matching exactly that combin
  -  [ ] Filter reads by match  
  -  [ ] Counting reads with match  
 ## UI
- -  [ ] Make elements in the search panel clickable, try implementations discussed in [ratatui repo](https://github.com/ratatui-org/ratatui/discussions/552)  
+ -  [x] Make elements in the search panel clickable, try implementations discussed in [ratatui repo](https://github.com/ratatui-org/ratatui/discussions/552)  

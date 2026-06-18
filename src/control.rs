@@ -133,23 +133,28 @@ fn handle_mouse_options(tui: &Tui, mouse: MouseEvent) -> Update {
         return Update::CloseOverlay;
     }
     match crate::ui::options_hit(area, mouse.column, mouse.row) {
-        Some(i) => option_update(crate::ui::OPTION_ITEMS[i]),
+        Some(i) => option_update(crate::app::OPTION_ITEMS[i]),
         None => Update::None,
     }
 }
 
 /// Maps an Options-pane item to the update that toggles it.
-fn option_update(item: crate::ui::OptionItem) -> Update {
+fn option_update(item: crate::app::OptionItem) -> Update {
     match item {
-        crate::ui::OptionItem::Copy => Update::ToggleCopyMode,
-        crate::ui::OptionItem::Italic => Update::ToggleQualityItalic,
-        crate::ui::OptionItem::Background => Update::ToggleQualityBackground,
+        crate::app::OptionItem::Copy => Update::ToggleCopyMode,
+        crate::app::OptionItem::Italic => Update::ToggleQualityItalic,
+        crate::app::OptionItem::Background => Update::ToggleQualityBackground,
     }
 }
 
 fn handle_input_options(keyevent: KeyEvent) -> Update {
     match keyevent {
         KeyEvent { code: KeyCode::Esc, .. } => Update::CloseOverlay,
+        KeyEvent {
+            code: KeyCode::Char('o'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => Update::CloseOverlay,
         KeyEvent {
             code: KeyCode::Char('c'),
             modifiers: KeyModifiers::NONE,
@@ -191,6 +196,22 @@ fn handle_input_file_save(app: &App, _tui: &Tui, keyevent: KeyEvent) -> Update {
         Update::SaveFilePopupInput(keyevent)
     }
 }
+
+/// (keys, description) rows for the Help popup. Single source of truth, kept here
+/// next to the key handlers below so the two stay in sync; rendered by ui::render_help.
+pub const KEY_REFERENCE: &[(&str, &str)] = &[
+    ("/ or Ctrl-f ", "toggle search panel"),
+    ("j / k or \u{2193} / \u{2191} ", "scroll down / up"),
+    ("Ctrl-d / Ctrl-u ", "page down / up"),
+    ("gg ", "jump to top"),
+    ("i ", "toggle low-quality italic"),
+    ("b ", "toggle quality background"),
+    ("o ", "toggle options pane"),
+    ("? ", "this help"),
+    ("q ", "quit"),
+    ("Esc ", "close popup / panel"),
+    ("c ", "toggle copy mode"),
+];
 
 pub fn handle_input_viewer(_app: &App, tui: &Tui, keyevent: KeyEvent) -> Update {
     match keyevent {
@@ -260,6 +281,13 @@ pub fn handle_input_viewer(_app: &App, tui: &Tui, keyevent: KeyEvent) -> Update 
             modifiers: KeyModifiers::NONE,
             ..
         } => Update::ToggleQualityBackground,
+
+        // Open the Options pane with 'o'
+        KeyEvent {
+            code: KeyCode::Char('o'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        } => Update::OpenOptions,
 
         // Open the key-reference help popup with '?'
         KeyEvent {

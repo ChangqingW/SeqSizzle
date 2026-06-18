@@ -336,12 +336,12 @@ impl<R: Read + Seek> FastqReader<R> {
                 }
             }
 
-            return Ok(Some(self.records_buffer[index - self.offset].clone()));
+            Ok(Some(self.records_buffer[index - self.offset].clone()))
         } else if index < self.offset {
             // rewind the buffer
             if index < RECORD_BUF_SIZE {
                 self.rewind()?;
-                return Ok(Some(self.records_buffer[index].clone()));
+                Ok(Some(self.records_buffer[index].clone()))
             } else {
                 self.records_buffer.clear();
                 self.buf_reader.rewind()?;
@@ -349,7 +349,7 @@ impl<R: Read + Seek> FastqReader<R> {
                 skip_n_records(&mut self.buf_reader, index - RECORD_BUF_SIZE / 4)?;
                 self.offset = index - RECORD_BUF_SIZE / 4;
                 self.fill_buffer()?;
-                return Ok(Some(self.records_buffer[RECORD_BUF_SIZE / 4].clone()));
+                Ok(Some(self.records_buffer[RECORD_BUF_SIZE / 4].clone()))
             }
         } else {
             Err(std::io::Error::new(

@@ -105,7 +105,7 @@ impl PositionCache {
     }
 
     fn should_cache(&self, record_index: usize) -> bool {
-        record_index % self.cache_interval == 0
+        record_index.is_multiple_of(self.cache_interval)
     }
 
     fn insert(&mut self, record_index: usize, position: u64) {

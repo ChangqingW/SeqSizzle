@@ -106,6 +106,20 @@ pub enum UIMode {
     Help,              // key-reference popup
 }
 
+/// Toggles shown in the Options pane, in display order. Single source of truth shared by
+/// rendering (ui.rs) and click mapping (control.rs).
+#[derive(Clone, Copy)]
+pub enum OptionItem {
+    Copy,
+    Italic,
+    Background,
+}
+pub const OPTION_ITEMS: [OptionItem; 3] =
+    [OptionItem::Copy, OptionItem::Italic, OptionItem::Background];
+
+/// Max delay between two clicks on the same pattern to count as a double-click.
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+
 #[derive(Default, Debug)]
 pub struct TransientMessage {
     message: String,
@@ -177,6 +191,27 @@ impl App<'_> {
     pub fn edit_search_pattern(&mut self, index: usize) {
         let pattern: SearchPattern = self.delete_search_pattern(index);
         self.search_panel.edit_pattern(pattern);
+    }
+
+    /// Handle a click on pattern `idx` in the patterns list: select it, and on a
+    /// double-click (same pattern clicked again within `DOUBLE_CLICK`) open it for
+    /// editing — equivalent to selecting the pattern and hitting Enter.
+    pub fn click_pattern(&mut self, idx: usize) {
+        self.search_panel
+            .focus(crate::search_panel::PanelElementName::PatternsList);
+        self.search_panel.select_pattern(idx);
+        let now = Instant::now();
+        let double = matches!(
+            self.last_pattern_click,
+            Some((t, i)) if i == idx && now.duration_since(t) < DOUBLE_CLICK
+        );
+        if double {
+            self.edit_search_pattern(idx);
+            self.search_panel.focus_next(false);
+            self.last_pattern_click = None;
+        } else {
+            self.last_pattern_click = Some((now, idx));
+        }
     }
 
     pub fn toggle_ui_mode(&mut self) {
@@ -516,30 +551,30 @@ impl App<'_> {
             
             // Create background color intervals for quality
             match config.quality_style_mode {
-                QualityStyleMode::Background | QualityStyleMode::Both => {
-                    if !quality_scores.is_empty() {
-                        // Group consecutive same-quality ranges into intervals
-                        let mut current_start = 0;
-                        let mut current_quality = quality_scores[0];
-                        
-                        for (i, &quality) in quality_scores.iter().enumerate().skip(1) {
-                            if quality != current_quality {
-                                // End current interval and start new one
-                                let color = quality_to_bg_color(current_quality);
-                                let interval = vec![(current_start, i - 1)].to_interval_set();
-                                bg_intervals.push((interval, color));
-                                
-                                current_start = i;
-                                current_quality = quality;
-                            }
-                        }
-                        
-                        // Add final interval
-                        if current_start < seq_len {
+                QualityStyleMode::Background | QualityStyleMode::Both
+                    if !quality_scores.is_empty() =>
+                {
+                    // Group consecutive same-quality ranges into intervals
+                    let mut current_start = 0;
+                    let mut current_quality = quality_scores[0];
+
+                    for (i, &quality) in quality_scores.iter().enumerate().skip(1) {
+                        if quality != current_quality {
+                            // End current interval and start new one
                             let color = quality_to_bg_color(current_quality);
-                            let interval = vec![(current_start, seq_len - 1)].to_interval_set();
+                            let interval = vec![(current_start, i - 1)].to_interval_set();
                             bg_intervals.push((interval, color));
+
+                            current_start = i;
+                            current_quality = quality;
                         }
+                    }
+
+                    // Add final interval
+                    if current_start < seq_len {
+                        let color = quality_to_bg_color(current_quality);
+                        let interval = vec![(current_start, seq_len - 1)].to_interval_set();
+                        bg_intervals.push((interval, color));
                     }
                 }
                 _ => {}

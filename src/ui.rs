@@ -1,4 +1,4 @@
-use crate::app::{App, QualityStyleMode, UIMode};
+use crate::app::{App, OptionItem, QualityStyleMode, UIMode, OPTION_ITEMS};
 
 
 use ratatui::{
@@ -37,7 +37,20 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         .scroll((app.scroll_status.1 as u16, 0)),
         frame.area(),
     );
-    // bottom-right controls: clickable buttons when interactive, a help hint in copy mode
+
+    render_viewer_controls(app, frame);
+
+    match app.mode {
+        UIMode::SearchPanel(_) => render_search_panel(app, frame),
+        UIMode::Options => render_options(app, frame),
+        UIMode::Help => render_help(frame),
+        UIMode::Viewer => {}
+    }
+}
+
+/// Bottom-right controls over the viewer: clickable buttons when interactive, a help
+/// hint in copy mode (where the mouse is released for terminal text selection).
+fn render_viewer_controls(app: &App, frame: &mut Frame) {
     if app.copy {
         let hint = "? for help";
         let row = frame.area().y + frame.area().height.saturating_sub(1);
@@ -50,140 +63,114 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     } else {
         let (options, patterns) = viewer_buttons(frame.area());
         let btn_style = Style::default().fg(Color::Cyan);
-        frame.render_widget(
-            Paragraph::new(Span::styled(BTN_OPTIONS, btn_style)),
-            options,
-        );
-        frame.render_widget(
-            Paragraph::new(Span::styled(BTN_PATTERNS, btn_style)),
-            patterns,
-        );
+        frame.render_widget(Paragraph::new(Span::styled(BTN_OPTIONS, btn_style)), options);
+        frame.render_widget(Paragraph::new(Span::styled(BTN_PATTERNS, btn_style)), patterns);
     }
+}
 
-    if let UIMode::SearchPanel(save_file_popup) = app.mode {
-        let center_area = centered_rect(80, 80, frame.area());
-        frame.render_widget(Clear, center_area);
-        frame.render_widget(&app.search_panel, center_area);
-        if save_file_popup {
-            let save_file_popup_area = centered_rect(80, 5, frame.area());
-            frame.render_widget(Clear, save_file_popup_area);
-            frame.render_widget(app.search_panel.file_save_popup_widget() , save_file_popup_area);
-        }
+/// The centered search panel overlay (and its save-file popup when open).
+fn render_search_panel(app: &App, frame: &mut Frame) {
+    let UIMode::SearchPanel(save_file_popup) = app.mode else {
+        return;
+    };
+    let center_area = centered_rect(80, 80, frame.area());
+    frame.render_widget(Clear, center_area);
+    frame.render_widget(&app.search_panel, center_area);
+    if save_file_popup {
+        let save_file_popup_area = centered_rect(80, 5, frame.area());
+        frame.render_widget(Clear, save_file_popup_area);
+        frame.render_widget(app.search_panel.file_save_popup_widget(), save_file_popup_area);
     }
+}
 
-    if let UIMode::Options = app.mode {
-        let area = options_area(frame.area());
-        frame.render_widget(Clear, area);
+/// The Options pane: a centered popup of clickable toggles.
+fn render_options(app: &App, frame: &mut Frame) {
+    let area = options_area(frame.area());
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Options")
+            .title_top(Line::from("[x]").alignment(Alignment::Right))
+            .title_bottom(Line::from("Esc to close").alignment(Alignment::Right)),
+        area,
+    );
+    let italic_on = matches!(
+        app.styling_config.quality_style_mode,
+        QualityStyleMode::Italic | QualityStyleMode::Both
+    );
+    let background_on = matches!(
+        app.styling_config.quality_style_mode,
+        QualityStyleMode::Background | QualityStyleMode::Both
+    );
+    for (i, item) in OPTION_ITEMS.iter().enumerate() {
+        let (on, label, desc) = match item {
+            OptionItem::Copy => (
+                app.copy,
+                "Copy mode (c)",
+                "(press c to enable clicking again)",
+            ),
+            OptionItem::Italic => (italic_on, "Low-quality italic (i)", ""),
+            OptionItem::Background => (background_on, "Quality background coloring (b)", ""),
+        };
+        let check = if on { "[x]" } else { "[ ]" };
+        let check_style = Style::default().fg(if on { Color::Green } else { Color::DarkGray });
+        let row = option_row(area, i);
         frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Options")
-                .title_top(Line::from("[x]").alignment(Alignment::Right))
-                .title_bottom(Line::from("Esc to close").alignment(Alignment::Right)),
-            area,
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("{check} "), check_style),
+                Span::raw(label),
+            ])),
+            row,
         );
-        let italic_on = matches!(
-            app.styling_config.quality_style_mode,
-            QualityStyleMode::Italic | QualityStyleMode::Both
-        );
-        let background_on = matches!(
-            app.styling_config.quality_style_mode,
-            QualityStyleMode::Background | QualityStyleMode::Both
-        );
-        for (i, item) in OPTION_ITEMS.iter().enumerate() {
-            let (on, label, desc) = match item {
-                OptionItem::Copy => (
-                    app.copy,
-                    "Copy mode (c)",
-                    "(press c to enable clicking again)",
-                ),
-                OptionItem::Italic => (italic_on, "Low-quality italic (i)", ""),
-                OptionItem::Background => {
-                    (background_on, "Quality background coloring (b)", "")
-                }
-            };
-            let check = if on { "[x]" } else { "[ ]" };
-            let check_style = Style::default().fg(if on { Color::Green } else { Color::DarkGray });
-            let row = option_row(area, i);
+        if !desc.is_empty() {
             frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(format!("{check} "), check_style),
-                    Span::raw(label),
-                ])),
-                row,
+                Paragraph::new(Span::styled(
+                    format!("    {desc}"),
+                    Style::default().fg(Color::DarkGray),
+                )),
+                Rect::new(row.x, row.y + 1, row.width, 1),
             );
-            if !desc.is_empty() {
-                frame.render_widget(
-                    Paragraph::new(Span::styled(
-                        format!("    {desc}"),
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                    Rect::new(row.x, row.y + 1, row.width, 1),
-                );
-            }
         }
     }
-
-    if let UIMode::Help = app.mode {
-        let area = centered_rect(50, 60, frame.area());
-        frame.render_widget(Clear, area);
-        let bindings = [
-            ("/ or Ctrl-f ", "toggle search panel"),
-            ("j / k or \u{2193} / \u{2191} ", "scroll down / up"),
-            ("Ctrl-d / Ctrl-u ", "page down / up"),
-            ("gg ", "jump to top"),
-            ("i ", "toggle low-quality italic"),
-            ("b ", "toggle quality background"),
-            ("? ", "this help"),
-            ("q ", "quit"),
-            ("Esc ", "close popup / panel"),
-            ("c ", "toggle copy mode"),
-        ];
-        let mut lines: Vec<Line> = bindings
-            .iter()
-            .map(|(key, desc)| {
-                Line::from(vec![
-                    Span::styled(
-                        format!("  {key:<16}"),
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(*desc),
-                ])
-            })
-            .collect();
-        lines.push(Line::from(Span::styled(
-                    "Clicking and mouse text-selection can't both be active: copy mode \
-                    releases the mouse so the terminal can select text. Most terminals also \
-                    let you hold Shift and drag to select text with copy mode off.",
-                    Style::default().fg(Color::DarkGray)
-                    )));
-                
-        frame.render_widget(
-            Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Key reference")
-                        .title_bottom(
-                            Line::from("any key to close").alignment(Alignment::Right),
-                        ),
-                )
-                .wrap(Wrap { trim: false }),
-            area,
-        );
-    }
 }
 
-/// Toggles shown in the Options pane, in display order. Single source of truth shared by
-/// rendering (ui.rs) and click mapping (control.rs).
-#[derive(Clone, Copy)]
-pub enum OptionItem {
-    Copy,
-    Italic,
-    Background,
+/// The key-reference Help popup. Bindings come from `control::KEY_REFERENCE` so they
+/// stay in sync with the actual handlers.
+fn render_help(frame: &mut Frame) {
+    let area = centered_rect(50, 60, frame.area());
+    frame.render_widget(Clear, area);
+    let mut lines: Vec<Line> = crate::control::KEY_REFERENCE
+        .iter()
+        .map(|(key, desc)| {
+            Line::from(vec![
+                Span::styled(
+                    format!("  {key:<16}"),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(*desc),
+            ])
+        })
+        .collect();
+    lines.push(Line::from(Span::styled(
+        "Clicking and mouse text-selection can't both be active: copy mode \
+        releases the mouse so the terminal can select text. Most terminals also \
+        let you hold Shift and drag to select text with copy mode off.",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Key reference")
+                    .title_bottom(Line::from("any key to close").alignment(Alignment::Right)),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
-pub const OPTION_ITEMS: [OptionItem; 3] =
-    [OptionItem::Copy, OptionItem::Italic, OptionItem::Background];
 
 // Options-pane layout, relative to the pane rect's top-left.
 const OPT_X_PAD: u16 = 2;
