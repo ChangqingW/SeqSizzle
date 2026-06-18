@@ -1,0 +1,75 @@
+name: Nightly
+
+permissions:
+  contents: write
+
+env:
+  CARGO_BUILD_RUSTFLAGS: -C target-feature=+crt-static
+  CARGO_PROFILE_RELEASE_LTO: true
+
+on:
+  push:
+    branches:
+      - master
+      - 'feat-*'
+      - 'fix-*'
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  create-nightly:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: echo "tag=nightly-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+      - name: Recreate rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          # Delete the old release + its tag if present (ignore if absent)
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          gh release create "$TAG" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Nightly ($GITHUB_REF_NAME)" \
+            --notes "Automated nightly build of \`$GITHUB_REF_NAME\` at $GITHUB_SHA. Prerelease — not a stable version."
+
+  upload-assets:
+    needs: create-nightly
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            build-tool: cargo
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            build-tool: cargo
+          - target: universal-apple-darwin
+            os: macos-latest
+            build-tool: cargo
+          - target: x86_64-pc-windows-gnu
+            os: windows-latest
+            build-tool: cargo
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: seqsizzle
+          target: ${{ matrix.target }}
+          build-tool: ${{ matrix.build-tool }}
+          ref: refs/tags/${{ needs.create-nightly.outputs.tag }}
+          # (optional) On which platform to distribute the `.tar.gz` file.
+          tar: unix
+          # (optional) On which platform to distribute the `.zip` file.
+          zip: windows
+          # (required) GitHub token for uploading assets to GitHub Releases.
+          token: ${{ secrets.GITHUB_TOKEN }}
