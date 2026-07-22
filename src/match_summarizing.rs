@@ -2,6 +2,7 @@ use crate::app::{App, SearchPattern};
 use crate::io::SequenceRecord;
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::cmp::Reverse;
 
 #[cfg(test)]
 use ratatui::prelude::Color;
@@ -302,7 +303,7 @@ pub fn summarise_reads(
         .collect();
 
     // sort by exact (per-group) count and return
-    ret.sort_by_key(|row| row.exact_count);
+    ret.sort_by_key(|row| Reverse(row.exact_count));
     // into percentage
     if !as_counts {
         let total: f64 = reads.len() as f64 / 100.0;

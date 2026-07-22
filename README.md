@@ -1,4 +1,4 @@
-SeqSizzle is a pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.  
+`seqsizzle` is a pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.  
 
 # Installation
 
@@ -9,7 +9,7 @@ You can simply download and run the binary from [Github Actions](https://github.
 
 ### Conda
 
-SeqSizzle is also available on [bioconda](https://bioconda.github.io/recipes/seqsizzle/README.html):
+seqsizzle is also available on [bioconda](https://bioconda.github.io/recipes/seqsizzle/README.html):
 ```
 conda install -c bioconda -c conda-forge seqsizzle
 ```
@@ -42,7 +42,7 @@ A pager for viewing FASTQ and FASTA files with fuzzy matching, allowing differen
 Usage: seqsizzle [OPTIONS] <FILE> [COMMAND]
 
 Commands:
-  summarize  Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped. Prints, for each pattern combination, a cumulative and an exact value in TSV format (three columns; with --counts the values are read counts, otherwise percentages of reads): cumulative_count/cumulative_percent, exact_count/exact_percent, and pattern_combination. The exact value is the number of reads matching that exact combination; the cumulative value also adds the counts of every longer combination that contains it as a contiguous block. Rows are sorted by the exact value. To be moved to the UI in the future
+  summarize  Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./seqsizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped. Prints, for each pattern combination, a cumulative and an exact value in TSV format (three columns; with --counts the values are read counts, otherwise percentages of reads): cumulative_count/cumulative_percent, exact_count/exact_percent, and pattern_combination. The exact value is the number of reads matching that exact combination; the cumulative value also adds the counts of every longer combination that contains it as a contiguous block. Rows are sorted by the exact value. To be moved to the UI in the future
   enrich     Find enriched k-mers in the reads. This can be used to identify potential adapter/primer sequences
   help       Print this message or the help of the given subcommand(s)
 
@@ -96,7 +96,7 @@ Viewer mode with background color styling enabled would make forground colors ha
 Make sure your terminal supports 256 colors (e.g. terminal emulators like iterm2, kitty, etc.) and your font support italics and bold styles otherwise it may look less appealing.
 
 ### Copy mode
-Clicking and native terminal text selection cannot both be active at once. SeqSizzle **starts in copy mode**, which releases the mouse so you can select and copy text with your terminal as usual. In this mode, you will need to use the `/`, `o` keys to open the search panel and option panel as clicking does not work. The popup panels always accept clicking and ignores copy mode.
+Clicking and native terminal text selection cannot both be active at once. `seqsizzle` **starts in copy mode**, which releases the mouse so you can select and copy text with your terminal as usual. In this mode, you will need to use the `/`, `o` keys to open the search panel and option panel as clicking does not work. The popup panels always accept clicking and ignores copy mode.
 Press `c` to turn copy mode off, which make the `[patterns]`  and `[options]` buttons available. Most terminals also let you hold **Shift** and drag to select text even with copy mode off.
 
 ### search panel mode
@@ -157,7 +157,7 @@ AGATCGGAAGAGCGTCGTGTAG,22,3441,0.34,assembled from k=12,384.5,32.4
 ### summarize
 `seqsizzle summarize --help`:
 ```
-Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./SeqSizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped. Prints, for each pattern combination, a cumulative and an exact value in TSV format (three columns; with --counts the values are read counts, otherwise percentages of reads): cumulative_count/cumulative_percent, exact_count/exact_percent, and pattern_combination. The exact value is the number of reads matching that exact combination; the cumulative value also adds the counts of every longer combination that contains it as a contiguous block. Rows are sorted by the exact value. To be moved to the UI in the future
+Summarize the reads with patterns specified by the --patterns argument or the adapter flags. Make sure you supply the flags BEFORE the subcommand, e.g. `./seqsizzle my.fastq -p my_patterns.csv --adapter-3p summarize`. '..' indicats unmatched regions of positive length, '-' indicates the patterns are overlapped. Prints, for each pattern combination, a cumulative and an exact value in TSV format (three columns; with --counts the values are read counts, otherwise percentages of reads): cumulative_count/cumulative_percent, exact_count/exact_percent, and pattern_combination. The exact value is the number of reads matching that exact combination; the cumulative value also adds the counts of every longer combination that contains it as a contiguous block. Rows are sorted by the exact value. To be moved to the UI in the future
 
 Usage: seqsizzle <FILE> summarize [OPTIONS]
 
@@ -185,13 +185,18 @@ The output indicates 36% of reads contains the R1 adaptor, followed by a polyT s
 
 The two value columns are `exact_percent` — reads matching exactly that combination — and `cumulative_percent`, which also adds every longer combination that contains it as a contiguous block (separators must match). With `--counts` the same two columns are reported as read counts (`exact_count`, `cumulative_count`) instead of percentages. The two columns coincide for the most common combinations above because none of them is contained in a longer one; shorter combinations elsewhere in the file have a higher cumulative value than exact value.
 
+# Citing `seqsizzle`
+
+Please consider citing our preprint [https://doi.org/10.64898/2026.07.17.738618](https://doi.org/10.64898/2026.07.17.738618) if you use `seqsizzle`
+
 # Roadmap
 ## functionality 
  -  [x] Gzip (`fastq.gz`) support
  -  [x] FASTA support
+ -  [ ] BAM support
  -  [x] Styling mismatches and low quality bases
  -  [x] Built-in k-mer enrichment to identify primers and adaptors
  -  [ ] Filter reads by match  
- -  [ ] Counting reads with match  
+ -  [x] Counting reads with match  
 ## UI
  -  [x] Make elements in the search panel clickable, try implementations discussed in [ratatui repo](https://github.com/ratatui-org/ratatui/discussions/552)  
