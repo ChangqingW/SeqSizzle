@@ -10,6 +10,7 @@ categories = ["command-line-utilities", "visualization", "science"]
 keywords = ["fastq", "pager", "genomic-sequencing", "bioinformatics", "visualization"]
 edition = "2021"
 build = "src/build.rs"
+exclude = ["*.gif", "*.mp4"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

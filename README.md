@@ -1,5 +1,7 @@
 `seqsizzle` is a pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.  
 
+<img src="https://raw.githubusercontent.com/ChangqingW/SeqSizzle/previews/seqsizzle-demo.gif" width="100%" alt="SeqSizzle demo">
+
 # Installation
 
 ### Pre-built binary
@@ -184,6 +186,10 @@ cumulative_percent	exact_percent	pattern_combination
 The output indicates 36% of reads contains the R1 adaptor, followed by a polyT stretch and the TSO sequence. The line above (rows sorted by `exact_percent`) indicates that 34% of reads are the reverse complement of that. The `..` indicates an insertion of unmatched sequence.
 
 The two value columns are `exact_percent` — reads matching exactly that combination — and `cumulative_percent`, which also adds every longer combination that contains it as a contiguous block (separators must match). With `--counts` the same two columns are reported as read counts (`exact_count`, `cumulative_count`) instead of percentages. The two columns coincide for the most common combinations above because none of them is contained in a longer one; shorter combinations elsewhere in the file have a higher cumulative value than exact value.
+
+## Demo data
+
+The data used in the demonstration GIF is [sampled](https://github.com/ChangqingW/SeqSizzle/blob/previews/README.md) from the PacBio single-nucleus data from [LongBench](https://github.com/mritchielab/LongBench.io). You can also download it from [here](https://raw.githubusercontent.com/ChangqingW/SeqSizzle/previews/test.fastq) to try it out.
 
 # Citing `seqsizzle`
 
