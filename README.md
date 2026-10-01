@@ -1,3 +1,7 @@
+[![DOI](https://zenodo.org/badge/715453106.svg)](https://doi.org/10.5281/zenodo.23034223)
+[![Open in Code Ocean](https://codeocean.com/codeocean-assets/badge/open-in-code-ocean.svg)](https://codeocean.com/capsule/8575353/tree/)
+[![bioRxiv](https://img.shields.io/badge/bioRxiv-10.64898%2F2026.07.17.738618-b31b1b)](https://doi.org/10.64898/2026.07.17.738618)
+
 `seqsizzle` is a pager for viewing FASTQ and FASTA files with fuzzy matching, allowing different adaptors to be colored differently.  
 
 <img src="https://raw.githubusercontent.com/ChangqingW/SeqSizzle/previews/seqsizzle-demo.gif" width="100%" alt="SeqSizzle demo">
